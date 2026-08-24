@@ -3,6 +3,7 @@
 import crypto from "node:crypto";
 import {spawn, spawnSync} from "node:child_process";
 import net from "node:net";
+import path from "node:path";
 import {fileURLToPath} from "node:url";
 import {
   DEFAULT_PORT,
@@ -11,6 +12,8 @@ import {
   encodeFrame,
   isTailscaleIPv4,
 } from "./protocol.mjs";
+
+const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 
 const GENERIC_FAILURE = {
   name: "NotAllowedError",
@@ -84,17 +87,19 @@ export function prepareAssertion(message) {
   assertOriginMayClaimRpId(override.origin, details.rpId);
 
   if (!Array.isArray(details.allowCredentials) ||
-      details.allowCredentials.length !== 1) {
-    throw new TypeError("exactly one allowed credential is required by this prototype");
+      details.allowCredentials.length < 1 || details.allowCredentials.length > 16) {
+    throw new TypeError("between one and 16 allowed credentials are required");
   }
-  const descriptor = details.allowCredentials[0];
-  if (descriptor?.type !== "public-key") {
-    throw new TypeError("allowed credential is not a public key");
-  }
-  const credentialId = decodeBase64Url(descriptor.id, "credential ID");
-  if (credentialId.length < 1 || credentialId.length > 1024) {
-    throw new TypeError("credential ID length is outside the accepted range");
-  }
+  const credentialIds = details.allowCredentials.map(descriptor => {
+    if (descriptor?.type !== "public-key") {
+      throw new TypeError("allowed credential is not a public key");
+    }
+    const credentialId = decodeBase64Url(descriptor.id, "credential ID");
+    if (credentialId.length < 1 || credentialId.length > 1024) {
+      throw new TypeError("credential ID length is outside the accepted range");
+    }
+    return credentialId;
+  });
 
   const userVerification = details.userVerification ?? "preferred";
   if (!["required", "preferred", "discouraged"].includes(userVerification)) {
@@ -110,52 +115,58 @@ export function prepareAssertion(message) {
   const input = [
     toBase64(clientDataHash),
     details.rpId,
-    toBase64(credentialId),
-    "",
-  ].join("\n");
+    String(credentialIds.length),
+    ...credentialIds.map(toBase64),
+  ].join("\n") + "\n";
   const requestedTimeout = Number(details.timeout);
   const timeoutMs = Number.isFinite(requestedTimeout)
-    ? Math.max(15_000, Math.min(120_000, Math.trunc(requestedTimeout)))
-    : 60_000;
+    ? Math.max(30_000, Math.min(300_000, Math.trunc(requestedTimeout)))
+    : 180_000;
 
   return {
     requestId: message.requestId,
     rpId: details.rpId,
     origin: override.origin,
-    credentialId,
+    credentialIds,
     clientData,
     clientDataHash,
     input,
     timeoutMs,
-    requireUserVerification: userVerification !== "discouraged",
+    userVerification,
   };
 }
 
 export function assertionResponseJson(prepared, output) {
   const lines = output.trimEnd().split("\n");
-  if (lines.length < 4 || lines.length > 5) {
-    throw new TypeError("unexpected fido2-assert output line count");
+  if (lines.length < 5 || lines.length > 6) {
+    throw new TypeError("unexpected assertion-helper output line count");
   }
   const returnedHash = Buffer.from(lines[0], "base64");
   if (returnedHash.length !== prepared.clientDataHash.length ||
       !crypto.timingSafeEqual(returnedHash, prepared.clientDataHash) ||
       lines[1] !== prepared.rpId) {
-    throw new TypeError("fido2-assert echoed different request parameters");
+    throw new TypeError("assertion helper echoed different request parameters");
   }
-  const authenticatorData = Buffer.from(lines[2], "base64");
-  const signature = Buffer.from(lines[3], "base64");
+  const credentialId = Buffer.from(lines[2], "base64");
+  if (!prepared.credentialIds.some(allowed =>
+    allowed.length === credentialId.length &&
+    crypto.timingSafeEqual(allowed, credentialId))) {
+    throw new TypeError("assertion helper returned an unrequested credential");
+  }
+  const authenticatorData = Buffer.from(lines[3], "base64");
+  const signature = Buffer.from(lines[4], "base64");
   if (authenticatorData.length < 37 || signature.length < 8) {
-    throw new TypeError("fido2-assert returned a truncated assertion");
+    throw new TypeError("assertion helper returned a truncated assertion");
   }
-  const userHandle = lines.length === 5 && lines[4] !== ""
-    ? toBase64Url(Buffer.from(lines[4], "base64"))
+  const userHandle = lines.length === 6 && lines[5] !== ""
+    ? toBase64Url(Buffer.from(lines[5], "base64"))
     : null;
-  const credentialId = toBase64Url(prepared.credentialId);
+  const credentialIdText = toBase64Url(credentialId);
   return JSON.stringify({
     authenticatorAttachment: "cross-platform",
     clientExtensionResults: {},
-    id: credentialId,
-    rawId: credentialId,
+    id: credentialIdText,
+    rawId: credentialIdText,
     response: {
       authenticatorData: toBase64Url(authenticatorData),
       clientDataJSON: toBase64Url(prepared.clientData),
@@ -196,14 +207,17 @@ export function parseProxyV1Header(buffer) {
   return {source: match[1], rest: buffer.subarray(end + 2)};
 }
 
-function parseArguments(argv) {
+export function parseArguments(argv) {
   const result = {
     listen: null,
     allowClient: null,
     port: DEFAULT_PORT,
-    assertBinary: process.env.FIDO2_ASSERT_BIN ?? "fido2-assert",
+    assertBinary: process.env.REMOTE_FIDO_ASSERT_BIN ??
+      process.env.FIDO2_ASSERT_BIN ??
+      path.join(currentDirectory, "build", "remote-fido-assert"),
     tokenBinary: process.env.FIDO2_TOKEN_BIN ?? "fido2-token",
     proxyProtocol: false,
+    attempts: 3,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const option = argv[index];
@@ -214,12 +228,14 @@ function parseArguments(argv) {
       result.allowClient = value;
     } else if (option === "--port" && value) {
       result.port = Number(value);
-    } else if (option === "--fido2-assert" && value) {
+    } else if ((option === "--assert-helper" || option === "--fido2-assert") && value) {
       result.assertBinary = value;
     } else if (option === "--fido2-token" && value) {
       result.tokenBinary = value;
     } else if (option === "--proxy-protocol" && value === "1") {
       result.proxyProtocol = true;
+    } else if (option === "--attempts" && /^[1-5]$/.test(value ?? "")) {
+      result.attempts = Number(value);
     } else {
       throw new TypeError(`unknown or incomplete option: ${option}`);
     }
@@ -244,6 +260,7 @@ function runAssertion(socket, message, options, onDone) {
   try {
     prepared = prepareAssertion(message);
   } catch (error) {
+    console.error(`request ${String(message?.requestId)} rejected: ${error.message}`);
     send(socket, {
       version: PROTOCOL_VERSION,
       type: "response",
@@ -269,12 +286,16 @@ function runAssertion(socket, message, options, onDone) {
     return;
   }
 
-  console.error(`request ${prepared.requestId}: ${prepared.origin} -> ${prepared.rpId}`);
-  const args = ["-G", "-p"];
-  if (prepared.requireUserVerification) {
-    args.push("-v");
-  }
-  args.push(device);
+  console.error(
+    `request ${prepared.requestId}: ${prepared.origin} -> ${prepared.rpId}; ` +
+    `credentials=${prepared.credentialIds.length} uv=${prepared.userVerification} ` +
+    `timeout=${prepared.timeoutMs}ms`);
+  const args = [
+    "--timeout-ms", String(prepared.timeoutMs),
+    "--attempts", String(options.attempts),
+    "--uv", prepared.userVerification,
+    device,
+  ];
   const child = spawn(options.assertBinary, args, {
     stdio: ["pipe", "pipe", "inherit"],
   });
@@ -291,14 +312,14 @@ function runAssertion(socket, message, options, onDone) {
   const cancel = () => {
     if (!settled) child.kill("SIGTERM");
   };
-  const timer = setTimeout(() => child.kill("SIGTERM"), prepared.timeoutMs);
+  const timer = setTimeout(() => child.kill("SIGTERM"), prepared.timeoutMs + 5_000);
   socket.once("close", cancel);
   child.stdout.on("data", chunk => {
     stdout = Buffer.concat([stdout, chunk]);
     if (stdout.length > 1024 * 1024) child.kill("SIGTERM");
   });
   child.once("error", error => {
-    console.error(`request ${prepared.requestId}: cannot run fido2-assert: ${error.message}`);
+    console.error(`request ${prepared.requestId}: cannot run assertion helper: ${error.message}`);
     finish({
       version: PROTOCOL_VERSION,
       type: "response",
@@ -309,7 +330,7 @@ function runAssertion(socket, message, options, onDone) {
   child.once("exit", code => {
     if (settled) return;
     if (code !== 0) {
-      console.error(`request ${prepared.requestId}: fido2-assert exited ${code}`);
+      console.error(`request ${prepared.requestId}: assertion helper exited ${code}`);
       finish({
         version: PROTOCOL_VERSION,
         type: "response",
@@ -429,7 +450,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
     runExporter(parseArguments(process.argv.slice(2)));
   } catch (error) {
-    console.error(`usage: exporter.mjs --listen ADDRESS --allow-client TAILSCALE_IP [--port ${DEFAULT_PORT}] [--proxy-protocol 1]`);
+    console.error(`usage: exporter.mjs --listen ADDRESS --allow-client TAILSCALE_IP [--port ${DEFAULT_PORT}] [--proxy-protocol 1] [--assert-helper PATH] [--attempts 1-5]`);
     console.error(error.message);
     process.exit(64);
   }

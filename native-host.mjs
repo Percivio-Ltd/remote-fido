@@ -50,8 +50,33 @@ function forward(message) {
   const socket = net.createConnection({host: config.connect, port: config.port});
   const decoder = new FrameDecoder();
   const requestId = message.requestId;
-  const timeoutMs = message.type === "hello" ? 5000 : 125000;
-  const timer = setTimeout(() => socket.destroy(new Error("exporter timeout")), timeoutMs);
+  let settled = false;
+  let timeoutMs = 5000;
+  if (message.type === "get") {
+    try {
+      const requested = Number(JSON.parse(message.requestDetailsJson).timeout);
+      const ceremonyMs = Number.isFinite(requested)
+        ? Math.max(30_000, Math.min(300_000, Math.trunc(requested)))
+        : 180_000;
+      timeoutMs = ceremonyMs + 10_000;
+    } catch {
+      timeoutMs = 190_000;
+    }
+  }
+  let timer;
+  const fail = error => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    console.error(`remote FIDO exporter error: ${error.message}`);
+    sendToChrome(message.type === "hello"
+      ? {version: PROTOCOL_VERSION, type: "hello", ready: false}
+      : safeFailure(requestId));
+  };
+  timer = setTimeout(() => {
+    fail(new Error("exporter timeout"));
+    socket.destroy();
+  }, timeoutMs);
   if (Number.isSafeInteger(requestId)) pending.set(requestId, socket);
   socket.once("connect", () => {
     console.error(`connected to remote FIDO exporter for ${String(message.type)}`);
@@ -61,6 +86,8 @@ function forward(message) {
     try {
       const responses = decoder.push(chunk);
       if (responses.length === 1) {
+        if (settled) return;
+        settled = true;
         clearTimeout(timer);
         sendToChrome(responses[0]);
         socket.end();
@@ -69,14 +96,10 @@ function forward(message) {
       socket.destroy(error);
     }
   });
-  socket.once("error", error => {
-    console.error(`remote FIDO exporter error: ${error.message}`);
-    sendToChrome(message.type === "hello"
-      ? {version: PROTOCOL_VERSION, type: "hello", ready: false}
-      : safeFailure(requestId));
-  });
+  socket.once("error", fail);
   socket.once("close", () => {
     clearTimeout(timer);
+    if (!settled) fail(new Error("exporter closed without a response"));
     if (Number.isSafeInteger(requestId) && pending.get(requestId) === socket) {
       pending.delete(requestId);
     }

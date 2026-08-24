@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {assertionResponseJson, parseProxyV1Header, prepareAssertion} from "./exporter.mjs";
+import {
+  assertionResponseJson,
+  parseArguments,
+  parseProxyV1Header,
+  prepareAssertion,
+} from "./exporter.mjs";
 import {
   FrameDecoder,
   PROTOCOL_VERSION,
@@ -22,7 +27,7 @@ const request = {
       },
     },
     rpId: "openai.com",
-    timeout: 30000,
+    timeout: 180000,
     userVerification: "required",
   }),
 };
@@ -57,12 +62,21 @@ test("PROXY v1 preserves the exact tailnet source", () => {
     /invalid/);
 });
 
+test("exporter touch-attempt count is bounded", () => {
+  const base = ["--listen", "127.0.0.1", "--allow-client", "100.120.158.10",
+    "--proxy-protocol", "1"];
+  assert.equal(parseArguments(base).attempts, 3);
+  assert.equal(parseArguments([...base, "--attempts", "1"]).attempts, 1);
+  assert.throws(() => parseArguments([...base, "--attempts", "6"]), /unknown/);
+});
+
 test("remote WebAuthn request becomes an exact local FIDO assertion input", () => {
   const prepared = prepareAssertion(request);
   assert.equal(prepared.requestId, 17);
   assert.equal(prepared.origin, "https://auth.openai.com");
   assert.equal(prepared.rpId, "openai.com");
-  assert.equal(prepared.requireUserVerification, true);
+  assert.equal(prepared.userVerification, "required");
+  assert.equal(prepared.timeoutMs, 180000);
   const clientData = JSON.parse(prepared.clientData.toString("utf8"));
   assert.deepEqual(clientData, {
     type: "webauthn.get",
@@ -70,7 +84,8 @@ test("remote WebAuthn request becomes an exact local FIDO assertion input", () =
     origin: "https://auth.openai.com",
     crossOrigin: false,
   });
-  assert.equal(prepared.input.split("\n").length, 4);
+  assert.equal(prepared.credentialIds.length, 1);
+  assert.equal(prepared.input.split("\n").length, 5);
 });
 
 test("response JSON preserves the original credential and client data", () => {
@@ -78,6 +93,7 @@ test("response JSON preserves the original credential and client data", () => {
   const output = [
     prepared.clientDataHash.toString("base64"),
     prepared.rpId,
+    prepared.credentialIds[0].toString("base64"),
     Buffer.alloc(37, 1).toString("base64"),
     Buffer.alloc(64, 2).toString("base64"),
     "",
@@ -86,6 +102,9 @@ test("response JSON preserves the original credential and client data", () => {
   assert.equal(response.id, "FBUW");
   assert.equal(response.rawId, "FBUW");
   assert.equal(response.authenticatorAttachment, "cross-platform");
+  assert.deepEqual(
+    Buffer.from(response.response.authenticatorData, "base64url"),
+    Buffer.alloc(37, 1));
   assert.deepEqual(
     JSON.parse(Buffer.from(response.response.clientDataJSON, "base64url").toString("utf8")),
     JSON.parse(prepared.clientData.toString("utf8")));
@@ -110,9 +129,33 @@ test("unsafe or unsupported requests fail before touching a key", () => {
   crossOrigin.requestDetailsJson = JSON.stringify(crossDetails);
   assert.throws(() => prepareAssertion(crossOrigin), /same-origin/);
 
+  const tooMany = structuredClone(request);
+  const tooManyDetails = JSON.parse(request.requestDetailsJson);
+  tooManyDetails.allowCredentials = Array.from({length: 17}, (_, index) => ({
+    id: Buffer.from([index + 1]).toString("base64url"),
+    type: "public-key",
+  }));
+  tooMany.requestDetailsJson = JSON.stringify(tooManyDetails);
+  assert.throws(() => prepareAssertion(tooMany), /one and 16/);
+});
+
+test("multiple registered passkeys are forwarded and the used credential is returned", () => {
   const multiple = structuredClone(request);
-  const multipleDetails = JSON.parse(request.requestDetailsJson);
-  multipleDetails.allowCredentials.push(multipleDetails.allowCredentials[0]);
-  multiple.requestDetailsJson = JSON.stringify(multipleDetails);
-  assert.throws(() => prepareAssertion(multiple), /exactly one/);
+  const details = JSON.parse(request.requestDetailsJson);
+  details.allowCredentials.push({id: "AQIDBA", type: "public-key"});
+  multiple.requestDetailsJson = JSON.stringify(details);
+  const prepared = prepareAssertion(multiple);
+  assert.equal(prepared.credentialIds.length, 2);
+  assert.equal(prepared.input.split("\n").length, 6);
+
+  const output = [
+    prepared.clientDataHash.toString("base64"),
+    prepared.rpId,
+    prepared.credentialIds[1].toString("base64"),
+    Buffer.alloc(37, 3).toString("base64"),
+    Buffer.alloc(64, 4).toString("base64"),
+    "",
+  ].join("\n");
+  const response = JSON.parse(assertionResponseJson(prepared, output));
+  assert.equal(response.id, "AQIDBA");
 });

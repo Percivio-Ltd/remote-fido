@@ -60,10 +60,13 @@ function connect() {
         !pending.has(message.requestId)) return;
     pending.delete(message.requestId);
     if (message.error) {
+      const exporterUnavailable =
+        message.error.message === "Remote FIDO exporter is unavailable";
       await chrome.webAuthenticationProxy.completeGetRequest({
         requestId: message.requestId,
         error: message.error
       });
+      if (exporterUnavailable) nativePort?.disconnect();
     } else {
       await chrome.webAuthenticationProxy.completeGetRequest({
         requestId: message.requestId,
