@@ -1,0 +1,14 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+runtime_dir=${0:A:h}
+for node_bin in /opt/homebrew/bin/node /usr/local/bin/node "$HOME/.local/bin/node"; do
+  if [[ -x "$node_bin" ]]; then
+    exec "$node_bin" "$runtime_dir/native-host.mjs" \
+      --config "$runtime_dir/config.json"
+  fi
+done
+
+print -u2 -- "remote FIDO native host requires Node.js in Homebrew or ~/.local/bin"
+exit 127
