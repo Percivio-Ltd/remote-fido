@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   assertionResponseJson,
+  clientAssertionResponseJson,
   parseArguments,
   parseProxyV1Header,
   prepareAssertion,
@@ -67,6 +68,11 @@ test("exporter touch-attempt count is bounded", () => {
     "--proxy-protocol", "1"];
   assert.equal(parseArguments(base).attempts, 3);
   assert.equal(parseArguments([...base, "--attempts", "1"]).attempts, 1);
+  const python = parseArguments([
+    ...base, "--assert-mode", "python", "--python", "/tmp/python",
+  ]);
+  assert.equal(python.assertMode, "python");
+  assert.equal(python.pythonBinary, "/tmp/python");
   assert.throws(() => parseArguments([...base, "--attempts", "6"]), /unknown/);
 });
 
@@ -86,6 +92,11 @@ test("remote WebAuthn request becomes an exact local FIDO assertion input", () =
   });
   assert.equal(prepared.credentialIds.length, 1);
   assert.equal(prepared.input.split("\n").length, 5);
+});
+
+test("signed Chrome request IDs are preserved", () => {
+  const prepared = prepareAssertion({...request, requestId: -858482908});
+  assert.equal(prepared.requestId, -858482908);
 });
 
 test("response JSON preserves the original credential and client data", () => {
@@ -108,6 +119,42 @@ test("response JSON preserves the original credential and client data", () => {
   assert.deepEqual(
     JSON.parse(Buffer.from(response.response.clientDataJSON, "base64url").toString("utf8")),
     JSON.parse(prepared.clientData.toString("utf8")));
+});
+
+test("high-level client response is bound to the original request", () => {
+  const prepared = prepareAssertion(request);
+  const clientDataJSON = Buffer.from(JSON.stringify({
+    type: "webauthn.get",
+    challenge: prepared.challenge,
+    origin: prepared.origin,
+    crossOrigin: false,
+  })).toString("base64url");
+  const output = JSON.stringify({
+    id: "FBUW",
+    rawId: "FBUW",
+    response: {
+      clientDataJSON,
+      authenticatorData: Buffer.alloc(37, 5).toString("base64url"),
+      signature: Buffer.alloc(64, 6).toString("base64url"),
+      userHandle: null,
+    },
+    authenticatorAttachment: "cross-platform",
+    clientExtensionResults: {},
+    type: "public-key",
+  });
+  const response = JSON.parse(clientAssertionResponseJson(prepared, output));
+  assert.equal(response.rawId, "FBUW");
+
+  const changed = JSON.parse(output);
+  changed.response.clientDataJSON = Buffer.from(JSON.stringify({
+    type: "webauthn.get",
+    challenge: prepared.challenge,
+    origin: "https://attacker.example",
+    crossOrigin: false,
+  })).toString("base64url");
+  assert.throws(
+    () => clientAssertionResponseJson(prepared, JSON.stringify(changed)),
+    /different client data/);
 });
 
 test("unsafe or unsupported requests fail before touching a key", () => {

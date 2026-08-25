@@ -56,7 +56,7 @@ export function prepareAssertion(message) {
   if (message?.version !== PROTOCOL_VERSION || message?.type !== "get") {
     throw new TypeError("unsupported remote-FIDO request");
   }
-  if (!Number.isSafeInteger(message.requestId) || message.requestId < 0) {
+  if (!Number.isSafeInteger(message.requestId)) {
     throw new TypeError("invalid request ID");
   }
   if (typeof message.requestDetailsJson !== "string") {
@@ -122,6 +122,16 @@ export function prepareAssertion(message) {
   const timeoutMs = Number.isFinite(requestedTimeout)
     ? Math.max(30_000, Math.min(300_000, Math.trunc(requestedTimeout)))
     : 180_000;
+  const clientInput = JSON.stringify({
+    origin: override.origin,
+    options: {
+      allowCredentials: details.allowCredentials,
+      challenge: details.challenge,
+      rpId: details.rpId,
+      timeout: timeoutMs,
+      userVerification,
+    },
+  }) + "\n";
 
   return {
     requestId: message.requestId,
@@ -130,10 +140,47 @@ export function prepareAssertion(message) {
     credentialIds,
     clientData,
     clientDataHash,
+    clientInput,
+    challenge: details.challenge,
     input,
     timeoutMs,
     userVerification,
   };
+}
+
+export function clientAssertionResponseJson(prepared, output) {
+  const response = JSON.parse(output);
+  if (response?.type !== "public-key" ||
+      response.id !== response.rawId ||
+      response.authenticatorAttachment !== "cross-platform" ||
+      typeof response.response !== "object" || response.response === null) {
+    throw new TypeError("unexpected WebAuthn client response shape");
+  }
+  const credentialId = decodeBase64Url(response.rawId, "returned credential ID");
+  if (!prepared.credentialIds.some(allowed =>
+    allowed.length === credentialId.length &&
+    crypto.timingSafeEqual(allowed, credentialId))) {
+    throw new TypeError("WebAuthn client returned an unrequested credential");
+  }
+  const clientData = decodeBase64Url(
+    response.response.clientDataJSON, "returned client data");
+  const clientDataValue = JSON.parse(clientData.toString("utf8"));
+  if (clientDataValue.type !== "webauthn.get" ||
+      clientDataValue.challenge !== prepared.challenge ||
+      clientDataValue.origin !== prepared.origin ||
+      clientDataValue.crossOrigin !== false) {
+    throw new TypeError("WebAuthn client returned different client data");
+  }
+  const authenticatorData = decodeBase64Url(
+    response.response.authenticatorData, "returned authenticator data");
+  const signature = decodeBase64Url(
+    response.response.signature, "returned signature");
+  if (authenticatorData.length < 37 || signature.length < 8 ||
+      typeof response.clientExtensionResults !== "object" ||
+      response.clientExtensionResults === null) {
+    throw new TypeError("WebAuthn client returned a truncated assertion");
+  }
+  return JSON.stringify(response);
 }
 
 export function assertionResponseJson(prepared, output) {
@@ -215,6 +262,10 @@ export function parseArguments(argv) {
     assertBinary: process.env.REMOTE_FIDO_ASSERT_BIN ??
       process.env.FIDO2_ASSERT_BIN ??
       path.join(currentDirectory, "build", "remote-fido-assert"),
+    assertClient: process.env.REMOTE_FIDO_ASSERT_CLIENT ??
+      path.join(currentDirectory, "assert-client.py"),
+    assertMode: process.env.REMOTE_FIDO_ASSERT_MODE ?? "c",
+    pythonBinary: process.env.REMOTE_FIDO_PYTHON ?? "python3",
     tokenBinary: process.env.FIDO2_TOKEN_BIN ?? "fido2-token",
     proxyProtocol: false,
     attempts: 3,
@@ -230,6 +281,12 @@ export function parseArguments(argv) {
       result.port = Number(value);
     } else if ((option === "--assert-helper" || option === "--fido2-assert") && value) {
       result.assertBinary = value;
+    } else if (option === "--assert-client" && value) {
+      result.assertClient = value;
+    } else if (option === "--assert-mode" && ["c", "python"].includes(value)) {
+      result.assertMode = value;
+    } else if (option === "--python" && value) {
+      result.pythonBinary = value;
     } else if (option === "--fido2-token" && value) {
       result.tokenBinary = value;
     } else if (option === "--proxy-protocol" && value === "1") {
@@ -245,7 +302,8 @@ export function parseArguments(argv) {
     ? result.listen === "127.0.0.1"
     : isTailscaleIPv4(result.listen);
   if (!validListen || !isTailscaleIPv4(result.allowClient) ||
-      !Number.isInteger(result.port) || result.port < 1 || result.port > 65535) {
+      !Number.isInteger(result.port) || result.port < 1 || result.port > 65535 ||
+      !["c", "python"].includes(result.assertMode)) {
     throw new TypeError("listen and allow-client must be Tailscale IPv4 addresses and port must be valid");
   }
   return result;
@@ -290,13 +348,18 @@ function runAssertion(socket, message, options, onDone) {
     `request ${prepared.requestId}: ${prepared.origin} -> ${prepared.rpId}; ` +
     `credentials=${prepared.credentialIds.length} uv=${prepared.userVerification} ` +
     `timeout=${prepared.timeoutMs}ms`);
-  const args = [
+  const helperArgs = [
     "--timeout-ms", String(prepared.timeoutMs),
-    "--attempts", String(options.attempts),
     "--uv", prepared.userVerification,
     device,
   ];
-  const child = spawn(options.assertBinary, args, {
+  const command = options.assertMode === "python"
+    ? options.pythonBinary : options.assertBinary;
+  const args = options.assertMode === "python"
+    ? [options.assertClient, ...helperArgs]
+    : [helperArgs[0], helperArgs[1], "--attempts", String(options.attempts),
+      ...helperArgs.slice(2)];
+  const child = spawn(command, args, {
     stdio: ["pipe", "pipe", "inherit"],
   });
   let stdout = Buffer.alloc(0);
@@ -340,11 +403,15 @@ function runAssertion(socket, message, options, onDone) {
       return;
     }
     try {
+      const responseJson = options.assertMode === "python"
+        ? clientAssertionResponseJson(prepared, stdout.toString("utf8"))
+        : assertionResponseJson(prepared, stdout.toString("utf8"));
+      console.error(`request ${prepared.requestId}: assertion completed`);
       finish({
         version: PROTOCOL_VERSION,
         type: "response",
         requestId: prepared.requestId,
-        responseJson: assertionResponseJson(prepared, stdout.toString("utf8")),
+        responseJson,
       });
     } catch (error) {
       console.error(`request ${prepared.requestId}: invalid assertion output: ${error.message}`);
@@ -356,7 +423,8 @@ function runAssertion(socket, message, options, onDone) {
       });
     }
   });
-  child.stdin.end(prepared.input);
+  child.stdin.end(options.assertMode === "python"
+    ? prepared.clientInput : prepared.input);
 }
 
 export function runExporter(options) {
@@ -450,7 +518,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
     runExporter(parseArguments(process.argv.slice(2)));
   } catch (error) {
-    console.error(`usage: exporter.mjs --listen ADDRESS --allow-client TAILSCALE_IP [--port ${DEFAULT_PORT}] [--proxy-protocol 1] [--assert-helper PATH] [--attempts 1-5]`);
+    console.error(`usage: exporter.mjs --listen ADDRESS --allow-client TAILSCALE_IP [--port ${DEFAULT_PORT}] [--proxy-protocol 1] [--assert-mode c|python] [--assert-helper PATH] [--assert-client PATH] [--python PATH] [--attempts 1-5]`);
     console.error(error.message);
     process.exit(64);
   }

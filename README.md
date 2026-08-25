@@ -3,19 +3,19 @@
 This prototype avoids both general USB passthrough and macOS virtual HID. A
 small Chrome extension in the Tart VM attaches through Chrome's public
 `webAuthenticationProxy` API. Its native host sends only one WebAuthn assertion
-request over Tailscale. On the physical Mac, a small libfido2 assertion helper
-asks the attached YubiKey to sign the exact client-data hash. The PIN prompt
-and touch remain on that physical Mac; the PIN is never stored or sent over
-the network.
+request over Tailscale. On the physical Mac, Yubico's Apache-2.0 Python
+`Fido2Client` performs the browser-style credential selection, PIN, and touch
+flow against the attached YubiKey. The PIN prompt and touch remain on that
+physical Mac; the PIN is never stored or sent over the network.
 
 ```text
 VM Chrome -> extension -> native host === Tailscale ===> exporter
-                                                       -> libfido2 tool
+                                                       -> Python FIDO2 client
                                                        -> local YubiKey
 ```
 
 The implementation uses no VirtualHere source or protocol. The architecture is
-derived from Chromium's documented proxy API and libfido2's public CLI.
+derived from Chromium's documented proxy API and Yubico's public FIDO2 API.
 
 ## What is implemented
 
@@ -27,13 +27,15 @@ derived from Chromium's documented proxy API and libfido2's public CLI.
   the authenticator returned to Chrome;
 - same-origin HTTPS RP/origin validation before the key is touched;
 - local PIN/touch via a visible Terminal session;
-- the browser's original ceremony deadline, split into as many as three
-  60-second touch windows;
-- PIN reprompting only when the key reports that more than one retry remains;
+- signed and non-negative Chrome request IDs (Chrome emits both);
+- the browser's original ceremony deadline, up to five minutes, with the touch
+  prompt emitted only when the authenticator actually requests presence;
+- up to three local PIN prompts after a wrong PIN, but only while the key
+  reports more than one retry remaining;
 - raw WebAuthn authenticator data rather than libfido2 CLI's CBOR wrapper; and
 - fail-closed detach when the exporter is not reachable.
 
-The v0.2.1 prototype intentionally rejects registration, cross-origin iframes,
+The v0.3.0 prototype intentionally rejects registration, cross-origin iframes,
 discoverable requests without an allow-credential ID, more than 16 credential
 IDs, and WebAuthn extensions other than `remoteDesktopClientOverride`. Those
 are honest missing surfaces, not silently downgraded operations.
@@ -56,32 +58,32 @@ assertion remains the acceptance test.
 
 ## Run on the Mac holding the YubiKey
 
-Install Homebrew `libfido2`, insert exactly one YubiKey, build the assertion
-helper, and start the exporter from a visible Terminal so the helper can obtain
-a PIN from `/dev/tty`:
+Install Homebrew `libfido2`, create the pinned Python environment, insert
+exactly one YubiKey, and start the exporter from a visible Terminal so the
+client can obtain a PIN from `/dev/tty`:
 
 ```sh
-./build-assert-helper.sh
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
 tailscale serve --bg --yes --tcp=9471 --proxy-protocol=1 tcp://127.0.0.1:9471
-node exporter.mjs \
+REMOTE_FIDO_ASSERT_MODE=python REMOTE_FIDO_PYTHON="$PWD/.venv/bin/python" \
+  node exporter.mjs \
   --listen 127.0.0.1 \
   --proxy-protocol 1 \
   --allow-client 100.81.150.46
 ```
 
 For one bounded diagnostic run, set `REMOTE_FIDO_DEBUG=1` before starting the
-exporter and add `--attempts 1`. The helper then enables libfido2 protocol
-diagnostics on stderr and stops after the first touch window. Do not retain
-that verbose output beyond diagnosis. Normal human-operated runs omit the
-flag and retain three touch windows.
+exporter. The Python client then enables protocol diagnostics on stderr. Do
+not retain that verbose output beyond diagnosis. Normal human-operated runs
+omit the flag.
 
-For a UV-required request the helper asks for the PIN once, then visibly and
-audibly announces each touch window. Repeated taps while a touch prompt is
-active do not cancel the request; the first accepted presence completes it. A
-wrong PIN is never retried automatically. The helper asks again only when the
-YubiKey reports more than one remaining PIN retry, permits at most three PIN
-entries in the ceremony, and stops immediately on PIN-auth-blocked or
-PIN-blocked. PIN bytes are cleansed from helper memory before normal exit.
+For a UV-required request the client asks for the PIN, then visibly and audibly
+announces the touch window only after the authenticator returns its
+user-presence keepalive. Repeated taps do not cancel the request; the first
+accepted presence completes it. A wrong PIN may be entered again only when the
+YubiKey reports more than one remaining retry. The ceremony permits at most
+three PIN entries and stops immediately when retrying could block the key.
 
 Replace the VM address with its Tailscale IPv4 address. Tailscale Serve accepts
 the tailnet connection and passes its original source in a PROXY v1 header;
@@ -122,4 +124,15 @@ The wire message is deliberately WebAuthn-level rather than USB-level. A
 foreground iPhone app can replace `exporter.mjs`, validate the same origin/RP
 tuple, and execute the assertion through Yubico's Apache-2.0 YubiKit using NFC
 where supported. User presence remains required for every ceremony. That
-variant is not implemented or claimed working in v0.2.1.
+variant is not implemented or claimed working in v0.3.0.
+
+## Live acceptance result
+
+On 2026-08-25, Agent-01 Chrome Profile 1 intercepted the real
+`https://auth.openai.com` assertion for RP `openai.com` while signing in through
+Google as `artus@lytiq.de`. It forwarded Chrome's four allowed credential IDs
+over Tailscale to Tidepool. The Python client accepted the local YubiKey PIN,
+emitted its touch prompt from the authenticator keepalive, consumed one touch
+on Yubi1, returned the selected assertion to Chrome, and Agent-01 reached the
+signed-in ChatGPT home page. This is a live end-to-end acceptance result, not a
+synthetic WebAuthn probe.
