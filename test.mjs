@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  assertionResponseJson,
   clientAssertionResponseJson,
   parseArguments,
   parseProxyV1Header,
@@ -63,17 +62,16 @@ test("PROXY v1 preserves the exact tailnet source", () => {
     /invalid/);
 });
 
-test("exporter touch-attempt count is bounded", () => {
+test("native Swift assertions are the default and Python is break-glass", () => {
   const base = ["--listen", "127.0.0.1", "--allow-client", "100.120.158.10",
     "--proxy-protocol", "1"];
-  assert.equal(parseArguments(base).attempts, 3);
-  assert.equal(parseArguments([...base, "--attempts", "1"]).attempts, 1);
+  assert.equal(parseArguments(base).assertMode, "swift");
   const python = parseArguments([
     ...base, "--assert-mode", "python", "--python", "/tmp/python",
   ]);
   assert.equal(python.assertMode, "python");
   assert.equal(python.pythonBinary, "/tmp/python");
-  assert.throws(() => parseArguments([...base, "--attempts", "6"]), /unknown/);
+  assert.throws(() => parseArguments([...base, "--assert-mode", "c"]), /unknown/);
 });
 
 test("remote WebAuthn request becomes an exact local FIDO assertion input", () => {
@@ -91,34 +89,11 @@ test("remote WebAuthn request becomes an exact local FIDO assertion input", () =
     crossOrigin: false,
   });
   assert.equal(prepared.credentialIds.length, 1);
-  assert.equal(prepared.input.split("\n").length, 5);
 });
 
 test("signed Chrome request IDs are preserved", () => {
   const prepared = prepareAssertion({...request, requestId: -858482908});
   assert.equal(prepared.requestId, -858482908);
-});
-
-test("response JSON preserves the original credential and client data", () => {
-  const prepared = prepareAssertion(request);
-  const output = [
-    prepared.clientDataHash.toString("base64"),
-    prepared.rpId,
-    prepared.credentialIds[0].toString("base64"),
-    Buffer.alloc(37, 1).toString("base64"),
-    Buffer.alloc(64, 2).toString("base64"),
-    "",
-  ].join("\n");
-  const response = JSON.parse(assertionResponseJson(prepared, output));
-  assert.equal(response.id, "FBUW");
-  assert.equal(response.rawId, "FBUW");
-  assert.equal(response.authenticatorAttachment, "cross-platform");
-  assert.deepEqual(
-    Buffer.from(response.response.authenticatorData, "base64url"),
-    Buffer.alloc(37, 1));
-  assert.deepEqual(
-    JSON.parse(Buffer.from(response.response.clientDataJSON, "base64url").toString("utf8")),
-    JSON.parse(prepared.clientData.toString("utf8")));
 });
 
 test("high-level client response is bound to the original request", () => {
@@ -136,7 +111,6 @@ test("high-level client response is bound to the original request", () => {
       clientDataJSON,
       authenticatorData: Buffer.alloc(37, 5).toString("base64url"),
       signature: Buffer.alloc(64, 6).toString("base64url"),
-      userHandle: null,
     },
     authenticatorAttachment: "cross-platform",
     clientExtensionResults: {},
@@ -155,6 +129,12 @@ test("high-level client response is bound to the original request", () => {
   assert.throws(
     () => clientAssertionResponseJson(prepared, JSON.stringify(changed)),
     /different client data/);
+
+  const nullUserHandle = JSON.parse(output);
+  nullUserHandle.response.userHandle = null;
+  assert.throws(
+    () => clientAssertionResponseJson(prepared, JSON.stringify(nullUserHandle)),
+    /user handle/);
 });
 
 test("unsafe or unsupported requests fail before touching a key", () => {
@@ -193,16 +173,4 @@ test("multiple registered passkeys are forwarded and the used credential is retu
   multiple.requestDetailsJson = JSON.stringify(details);
   const prepared = prepareAssertion(multiple);
   assert.equal(prepared.credentialIds.length, 2);
-  assert.equal(prepared.input.split("\n").length, 6);
-
-  const output = [
-    prepared.clientDataHash.toString("base64"),
-    prepared.rpId,
-    prepared.credentialIds[1].toString("base64"),
-    Buffer.alloc(37, 3).toString("base64"),
-    Buffer.alloc(64, 4).toString("base64"),
-    "",
-  ].join("\n");
-  const response = JSON.parse(assertionResponseJson(prepared, output));
-  assert.equal(response.id, "AQIDBA");
 });

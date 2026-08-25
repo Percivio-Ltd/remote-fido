@@ -27,20 +27,16 @@ tailscale_bin=""
 for candidate in /opt/homebrew/bin/tailscale /usr/local/bin/tailscale; do
   [[ -x "$candidate" ]] && tailscale_bin=$candidate && break
 done
-token_bin=""
-for candidate in /opt/homebrew/bin/fido2-token /usr/local/bin/fido2-token; do
-  [[ -x "$candidate" ]] && token_bin=$candidate && break
-done
-python_bin="$runtime_dir/.venv/bin/python"
+assert_bin="$runtime_dir/remote-fido-assert"
 
-for required in "$node_bin" "$tailscale_bin" "$token_bin" "$python_bin"; do
+for required in "$node_bin" "$tailscale_bin" "$assert_bin"; do
   if [[ -z "$required" || ! -x "$required" ]]; then
     print -u2 -- "STOP the installed Remote FIDO runtime is incomplete"
     exit 1
   fi
 done
 
-device_output=$($token_bin -L)
+device_output=$($assert_bin --ready)
 devices=("${(@f)device_output}")
 devices=("${(@)devices:#}")
 if (( ${#devices} != 1 )); then
@@ -56,9 +52,8 @@ print -- "The PIN and touch stay on this Mac. Press Control-C to stop."
 $tailscale_bin serve --bg --yes --tcp="$port" --proxy-protocol=1 \
   "tcp://127.0.0.1:$port"
 
-export REMOTE_FIDO_ASSERT_MODE=python
-export REMOTE_FIDO_PYTHON="$python_bin"
-export FIDO2_TOKEN_BIN="$token_bin"
+export REMOTE_FIDO_ASSERT_MODE=swift
+export REMOTE_FIDO_ASSERT_BIN="$assert_bin"
 exec "$node_bin" "$runtime_dir/exporter.mjs" \
   --listen 127.0.0.1 \
   --proxy-protocol 1 \

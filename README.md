@@ -12,14 +12,15 @@ cd remote-fido
 This prototype avoids both general USB passthrough and macOS virtual HID. A
 small Chrome extension in the Tart VM attaches through Chrome's public
 `webAuthenticationProxy` API. Its native host sends only one WebAuthn assertion
-request over Tailscale. On the physical Mac, Yubico's Apache-2.0 Python
-`Fido2Client` performs the browser-style credential selection, PIN, and touch
-flow against the attached YubiKey. The PIN prompt and touch remain on that
-physical Mac; the PIN is never stored or sent over the network.
+request over Tailscale. On the physical Mac, the native Swift
+`remote-fido-assert` process uses Yubico's Apache-2.0 YubiKit for browser-style
+credential selection, PIN, and touch against the attached YubiKey. The PIN
+prompt and touch remain on that physical Mac; the PIN is process-scoped and is
+never stored or sent over the network.
 
 ```text
 VM Chrome -> extension -> native host === Tailscale ===> exporter
-                                                       -> Python FIDO2 client
+                                                       -> Swift/YubiKit client
                                                        -> local YubiKey
 ```
 
@@ -39,6 +40,10 @@ derived from Chromium's documented proxy API and Yubico's public FIDO2 API.
 - signed and non-negative Chrome request IDs (Chrome emits both);
 - the browser's original ceremony deadline, up to five minutes, with the touch
   prompt emitted only when the authenticator actually requests presence;
+- one short-lived native process per assertion, so the HID interface is never
+  seized while the exporter is idle;
+- explicit CTAP cancellation, connection close, and process-exit backstops for
+  Chrome cancellation and local deadlines;
 - up to three local PIN prompts after a wrong PIN, but only while the key
   reports more than one retry remaining;
 - raw WebAuthn authenticator data rather than libfido2 CLI's CBOR wrapper;
@@ -47,7 +52,7 @@ derived from Chromium's documented proxy API and Yubico's public FIDO2 API.
   Chrome restart; and
 - a visible toolbar badge: `ON`, `KEY`, `OK`, `OFF`, or `ERR`.
 
-The v0.3.2 release intentionally rejects registration, cross-origin iframes,
+The v0.4.0 release intentionally rejects registration, cross-origin iframes,
 discoverable requests without an allow-credential ID, more than 16 credential
 IDs, and WebAuthn extensions other than `remoteDesktopClientOverride`. Those
 are honest missing surfaces, not silently downgraded operations.
@@ -56,22 +61,21 @@ are honest missing surfaces, not silently downgraded operations.
 
 ```sh
 node --test test.mjs extension/service-worker.test.mjs exporter-lifecycle.test.mjs
-./build-assert-helper.sh
-./build/remote-fido-assert --touch-test-u2f "$(fido2-token -L | sed 's/: .*//')"
+swift test --package-path mac-client
+./build-assert-swift.sh
+./build/remote-fido-assert --ready
 ```
 
-The touch test uses no account credential and changes nothing on the key. It
-is diagnostic only: YubiKey firmware 5.7.4 returns
-`CTAP2_ERR_OPERATION_DENIED` from libfido2's dummy CTAP2 `makeCredential`
-probe, and that ambiguous result is deliberately a failed diagnostic. The
-forced-U2F probe also did not independently report presence in the first live
-trial. Do not treat either result as a successful assertion. The real RP
-assertion remains the acceptance test.
+`--ready` requires exactly one FIDO HID device, opens it, performs a real CTAP2
+`getInfo`, closes it, and prints its stable IOKit identity. It requires no PIN
+or touch and changes nothing on the key. The real RP assertion remains the
+acceptance test.
 
 ## Run on the Mac holding the YubiKey
 
-Install Homebrew `libfido2`, insert exactly one YubiKey, then preview and apply
-the exporter installation. Every installation creates the lowercase
+Install Node.js and Tailscale, insert exactly one YubiKey, then preview and
+apply the exporter installation. Python, pip, a venv, and Homebrew libfido2 are
+not installed or used. Every installation creates the lowercase
 `~/bin/remote-fido` command; `--desktop` also creates a double-clickable
 launcher:
 
@@ -87,17 +91,30 @@ Control-C stops the exporter; the Chrome extension then detaches fail-closed.
 The Tailscale Serve rule may remain configured, but its loopback target is
 closed while the exporter is stopped.
 
-For one bounded diagnostic run, set `REMOTE_FIDO_DEBUG=1` before starting the
-exporter. The Python client then enables protocol diagnostics on stderr. Do
-not retain that verbose output beyond diagnosis. Normal human-operated runs
-omit the flag.
-
 For a UV-required request the client asks for the PIN, then visibly and audibly
 announces the touch window only after the authenticator returns its
 user-presence keepalive. Repeated taps do not cancel the request; the first
 accepted presence completes it. A wrong PIN may be entered again only when the
 YubiKey reports more than one remaining retry. The ceremony permits at most
 three PIN entries and stops immediately when retrying could block the key.
+The authenticator's approximately 29-second presence timeout is one attempt:
+v0.4.0 does not silently restart a timed-out assertion inside Chrome's longer
+outer deadline.
+
+The installer verifies `build/remote-fido-assert` against `SHA256SUMS` before
+copying it. The checked-in universal binary is ad-hoc signed for the internal
+`git clone` installation path. A downloadable quarantined release archive will
+need Developer ID signing and notarization before it becomes supported.
+
+### Break-glass Python rollback
+
+`assert-client.py` and its pinned `requirements.txt` remain in the source tree
+for the v0.4 observation window, but the installer does not copy or provision
+them. A manual diagnostic can create a temporary venv and launch `exporter.mjs`
+with `--assert-mode python`, an explicit `--python`, and `--assert-client`.
+This fallback still needs the native Swift binary for exact device readiness.
+It is not the installed steady-state runtime and is scheduled for removal in
+v0.5.
 
 Replace the VM address with its Tailscale IPv4 address. Tailscale Serve accepts
 the tailnet connection and passes its original source in a PROXY v1 header;
@@ -138,10 +155,11 @@ before the one-time **Load unpacked** action.
 ## iPhone direction
 
 The wire message is deliberately WebAuthn-level rather than USB-level. A
-foreground iPhone app can replace `exporter.mjs`, validate the same origin/RP
-tuple, and execute the assertion through Yubico's Apache-2.0 YubiKit using NFC
-where supported. User presence remains required for every ceremony. That
-variant is not implemented or claimed working in v0.3.2.
+foreground iPhone/iPad app can reuse `RemoteFidoCore`, validate the same
+origin/RP tuple, and execute the assertion through YubiKit using NFC or wired
+CCID where the device/key combination supports it. The core target already
+declares iOS 16 support, but no signed app, mobile rendezvous, or physical
+mobile ceremony is implemented or claimed working in v0.4.0.
 
 ## Live acceptance result
 

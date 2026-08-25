@@ -53,18 +53,14 @@ tailscale_bin=""
 for candidate in /opt/homebrew/bin/tailscale /usr/local/bin/tailscale; do
   [[ -x "$candidate" ]] && tailscale_bin=$candidate && break
 done
-token_bin=""
-for candidate in /opt/homebrew/bin/fido2-token /usr/local/bin/fido2-token; do
-  [[ -x "$candidate" ]] && token_bin=$candidate && break
-done
-python_bin=""
-for candidate in /opt/homebrew/bin/python3 /usr/local/bin/python3; do
-  [[ -x "$candidate" ]] && python_bin=$candidate && break
-done
+assert_bin="$script_dir/build/remote-fido-assert"
 
-if [[ -z "$node_bin" || -z "$tailscale_bin" || -z "$token_bin" ||
-      -z "$python_bin" ]]; then
-  print -u2 -- "STOP Node.js, Tailscale, Python 3, and Homebrew libfido2 are required"
+if [[ -z "$node_bin" || -z "$tailscale_bin" || ! -x "$assert_bin" ]]; then
+  print -u2 -- "STOP Node.js, Tailscale, and build/remote-fido-assert are required"
+  exit 1
+fi
+if ! (cd "$script_dir" && /usr/bin/shasum -a 256 -c SHA256SUMS >/dev/null); then
+  print -u2 -- "STOP native assertion client checksum verification failed"
   exit 1
 fi
 if (( desktop )) && [[ -e "$desktop_launcher" &&
@@ -80,8 +76,7 @@ if [[ -e "$cli_launcher" && ! -L "$cli_launcher" ]]; then
 fi
 
 print -- "MATCH Node.js $($node_bin --version)"
-print -- "MATCH Python $($python_bin --version 2>&1)"
-print -- "MATCH libfido2 $($token_bin -V 2>&1 | head -n 1)"
+print -- "MATCH native assertion client $(/usr/bin/shasum -a 256 "$assert_bin" | /usr/bin/awk '{print $1}')"
 print -- "TARGET exporter=$install_dir"
 print -- "TARGET client=$allow_client:$port"
 print -- "TARGET command=$cli_launcher"
@@ -91,14 +86,16 @@ if (( ! apply )); then
   exit 0
 fi
 
-/bin/mkdir -p "$install_dir"
+/bin/mkdir -p "$install_dir/LICENSES"
 /usr/bin/install -m 0644 "$script_dir/VERSION" "$install_dir/VERSION"
 /usr/bin/install -m 0755 "$script_dir/exporter.mjs" "$install_dir/exporter.mjs"
 /usr/bin/install -m 0644 "$script_dir/protocol.mjs" "$install_dir/protocol.mjs"
-/usr/bin/install -m 0755 "$script_dir/assert-client.py" "$install_dir/assert-client.py"
-/usr/bin/install -m 0755 "$script_dir/touch-probe.py" "$install_dir/touch-probe.py"
-/usr/bin/install -m 0644 "$script_dir/requirements.txt" "$install_dir/requirements.txt"
+/usr/bin/install -m 0755 "$assert_bin" "$install_dir/remote-fido-assert"
 /usr/bin/install -m 0755 "$script_dir/run-exporter.command" "$install_dir/run-exporter.command"
+/usr/bin/install -m 0644 "$script_dir/THIRD_PARTY_NOTICES.md" \
+  "$install_dir/THIRD_PARTY_NOTICES.md"
+/usr/bin/install -m 0644 "$script_dir/LICENSES/Apache-2.0.txt" \
+  "$install_dir/LICENSES/Apache-2.0.txt"
 
 config_path="$install_dir/config.json"
 /usr/bin/plutil -create xml1 "$config_path"
@@ -107,11 +104,9 @@ config_path="$install_dir/config.json"
 /usr/bin/plutil -convert json "$config_path"
 /bin/chmod 0600 "$config_path"
 
-if [[ ! -x "$install_dir/.venv/bin/python" ]]; then
-  "$python_bin" -m venv "$install_dir/.venv"
-fi
-"$install_dir/.venv/bin/pip" --disable-pip-version-check install \
-  --requirement "$install_dir/requirements.txt"
+/bin/rm -rf "$install_dir/.venv"
+/bin/rm -f "$install_dir/assert-client.py" "$install_dir/touch-probe.py" \
+  "$install_dir/requirements.txt"
 
 if (( desktop )); then
   /bin/rm -f "$desktop_launcher"

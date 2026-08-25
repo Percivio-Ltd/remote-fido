@@ -51,9 +51,7 @@ function exporterOptions(overrides = {}) {
     assertClient: "/unused",
     assertMode: "python",
     pythonBinary: process.execPath,
-    tokenBinary: "/unused",
     proxyProtocol: false,
-    attempts: 3,
     ...overrides,
   };
 }
@@ -87,12 +85,12 @@ test("a duplicate exporter reports EADDRINUSE without an uncaught process error"
 
 test("transport cancellation releases the busy state for the next request", async () => {
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "remote-fido-test-"));
-  const token = path.join(temporary, "fido2-token");
+  const ready = path.join(temporary, "remote-fido-assert");
   const client = path.join(temporary, "assert-client.mjs");
   const started = path.join(temporary, "started");
   const exited = path.join(temporary, "exited");
-  await fs.writeFile(token, "#!/bin/sh\nprintf 'ioreg://fake: test authenticator\\n'\n");
-  await fs.chmod(token, 0o755);
+  await fs.writeFile(ready, "#!/bin/sh\nprintf 'ioreg://fake: test authenticator\\n'\n");
+  await fs.chmod(ready, 0o755);
   await fs.writeFile(client, [
     "import fs from 'node:fs';",
     `fs.writeFileSync(${JSON.stringify(started)}, '');`,
@@ -102,8 +100,8 @@ test("transport cancellation releases the busy state for the next request", asyn
   ].join("\n"));
 
   const server = runExporter(exporterOptions({
+    assertBinary: ready,
     assertClient: client,
-    tokenBinary: token,
   }));
   await new Promise(resolve => server.once("listening", resolve));
   const port = server.address().port;

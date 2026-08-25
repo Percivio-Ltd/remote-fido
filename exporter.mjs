@@ -31,10 +31,6 @@ function toBase64Url(value) {
   return Buffer.from(value).toString("base64url");
 }
 
-function toBase64(value) {
-  return Buffer.from(value).toString("base64");
-}
-
 function assertOriginMayClaimRpId(origin, rpId) {
   let parsed;
   try {
@@ -111,13 +107,6 @@ export function prepareAssertion(message) {
     origin: override.origin,
     crossOrigin: false,
   }), "utf8");
-  const clientDataHash = crypto.createHash("sha256").update(clientData).digest();
-  const input = [
-    toBase64(clientDataHash),
-    details.rpId,
-    String(credentialIds.length),
-    ...credentialIds.map(toBase64),
-  ].join("\n") + "\n";
   const requestedTimeout = Number(details.timeout);
   const timeoutMs = Number.isFinite(requestedTimeout)
     ? Math.max(30_000, Math.min(300_000, Math.trunc(requestedTimeout)))
@@ -139,10 +128,8 @@ export function prepareAssertion(message) {
     origin: override.origin,
     credentialIds,
     clientData,
-    clientDataHash,
     clientInput,
     challenge: details.challenge,
-    input,
     timeoutMs,
     userVerification,
   };
@@ -175,6 +162,9 @@ export function clientAssertionResponseJson(prepared, output) {
     response.response.authenticatorData, "returned authenticator data");
   const signature = decodeBase64Url(
     response.response.signature, "returned signature");
+  if (Object.hasOwn(response.response, "userHandle")) {
+    decodeBase64Url(response.response.userHandle, "returned user handle");
+  }
   if (authenticatorData.length < 37 || signature.length < 8 ||
       typeof response.clientExtensionResults !== "object" ||
       response.clientExtensionResults === null) {
@@ -183,59 +173,18 @@ export function clientAssertionResponseJson(prepared, output) {
   return JSON.stringify(response);
 }
 
-export function assertionResponseJson(prepared, output) {
-  const lines = output.trimEnd().split("\n");
-  if (lines.length < 5 || lines.length > 6) {
-    throw new TypeError("unexpected assertion-helper output line count");
-  }
-  const returnedHash = Buffer.from(lines[0], "base64");
-  if (returnedHash.length !== prepared.clientDataHash.length ||
-      !crypto.timingSafeEqual(returnedHash, prepared.clientDataHash) ||
-      lines[1] !== prepared.rpId) {
-    throw new TypeError("assertion helper echoed different request parameters");
-  }
-  const credentialId = Buffer.from(lines[2], "base64");
-  if (!prepared.credentialIds.some(allowed =>
-    allowed.length === credentialId.length &&
-    crypto.timingSafeEqual(allowed, credentialId))) {
-    throw new TypeError("assertion helper returned an unrequested credential");
-  }
-  const authenticatorData = Buffer.from(lines[3], "base64");
-  const signature = Buffer.from(lines[4], "base64");
-  if (authenticatorData.length < 37 || signature.length < 8) {
-    throw new TypeError("assertion helper returned a truncated assertion");
-  }
-  const userHandle = lines.length === 6 && lines[5] !== ""
-    ? toBase64Url(Buffer.from(lines[5], "base64"))
-    : null;
-  const credentialIdText = toBase64Url(credentialId);
-  return JSON.stringify({
-    authenticatorAttachment: "cross-platform",
-    clientExtensionResults: {},
-    id: credentialIdText,
-    rawId: credentialIdText,
-    response: {
-      authenticatorData: toBase64Url(authenticatorData),
-      clientDataJSON: toBase64Url(prepared.clientData),
-      signature: toBase64Url(signature),
-      userHandle,
-    },
-    type: "public-key",
-  });
-}
-
-export function discoverSingleDevice(tokenBinary) {
-  const result = spawnSync(tokenBinary, ["-L"], {encoding: "utf8"});
+export function discoverSingleDevice(assertBinary) {
+  const result = spawnSync(assertBinary, ["--ready"], {encoding: "utf8"});
   if (result.status !== 0) {
-    throw new Error("fido2-token could not enumerate authenticators");
+    throw new Error("native assertion client could not open the authenticator");
   }
   const devices = result.stdout.split("\n").filter(Boolean);
   if (devices.length !== 1) {
-    throw new Error(`exactly one FIDO authenticator is required; found ${devices.length}`);
+    throw new Error(`native assertion client returned ${devices.length} readiness records`);
   }
   const separator = devices[0].indexOf(": ");
   if (separator < 1) {
-    throw new Error("fido2-token returned an unrecognized device record");
+    throw new Error("native assertion client returned an unrecognized readiness record");
   }
   return devices[0].slice(0, separator);
 }
@@ -264,11 +213,9 @@ export function parseArguments(argv) {
       path.join(currentDirectory, "build", "remote-fido-assert"),
     assertClient: process.env.REMOTE_FIDO_ASSERT_CLIENT ??
       path.join(currentDirectory, "assert-client.py"),
-    assertMode: process.env.REMOTE_FIDO_ASSERT_MODE ?? "python",
+    assertMode: process.env.REMOTE_FIDO_ASSERT_MODE ?? "swift",
     pythonBinary: process.env.REMOTE_FIDO_PYTHON ?? "python3",
-    tokenBinary: process.env.FIDO2_TOKEN_BIN ?? "fido2-token",
     proxyProtocol: false,
-    attempts: 3,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const option = argv[index];
@@ -283,16 +230,12 @@ export function parseArguments(argv) {
       result.assertBinary = value;
     } else if (option === "--assert-client" && value) {
       result.assertClient = value;
-    } else if (option === "--assert-mode" && ["c", "python"].includes(value)) {
+    } else if (option === "--assert-mode" && ["swift", "python"].includes(value)) {
       result.assertMode = value;
     } else if (option === "--python" && value) {
       result.pythonBinary = value;
-    } else if (option === "--fido2-token" && value) {
-      result.tokenBinary = value;
     } else if (option === "--proxy-protocol" && value === "1") {
       result.proxyProtocol = true;
-    } else if (option === "--attempts" && /^[1-5]$/.test(value ?? "")) {
-      result.attempts = Number(value);
     } else {
       throw new TypeError(`unknown or incomplete option: ${option}`);
     }
@@ -303,7 +246,7 @@ export function parseArguments(argv) {
     : isTailscaleIPv4(result.listen);
   if (!validListen || !isTailscaleIPv4(result.allowClient) ||
       !Number.isInteger(result.port) || result.port < 1 || result.port > 65535 ||
-      !["c", "python"].includes(result.assertMode)) {
+      !["swift", "python"].includes(result.assertMode)) {
     throw new TypeError("listen and allow-client must be Tailscale IPv4 addresses and port must be valid");
   }
   return result;
@@ -349,7 +292,7 @@ function runAssertion(socket, message, options, onDone) {
 
   let device;
   try {
-    device = discoverSingleDevice(options.tokenBinary);
+    device = discoverSingleDevice(options.assertBinary);
   } catch (error) {
     console.error(`request ${prepared.requestId}: ${error.message}`);
     send(socket, {
@@ -366,17 +309,13 @@ function runAssertion(socket, message, options, onDone) {
     `request ${prepared.requestId}: ${prepared.origin} -> ${prepared.rpId}; ` +
     `credentials=${prepared.credentialIds.length} uv=${prepared.userVerification} ` +
     `timeout=${prepared.timeoutMs}ms`);
-  const helperArgs = [
-    "--timeout-ms", String(prepared.timeoutMs),
-    "--uv", prepared.userVerification,
-    device,
-  ];
+  const helperArgs = ["--timeout-ms", String(prepared.timeoutMs),
+    "--uv", prepared.userVerification];
   const command = options.assertMode === "python"
     ? options.pythonBinary : options.assertBinary;
   const args = options.assertMode === "python"
-    ? [options.assertClient, ...helperArgs]
-    : [helperArgs[0], helperArgs[1], "--attempts", String(options.attempts),
-      ...helperArgs.slice(2)];
+    ? [options.assertClient, ...helperArgs, device]
+    : [...helperArgs, "--device", device];
   const child = spawn(command, args, {
     stdio: ["pipe", "pipe", "inherit"],
   });
@@ -444,9 +383,8 @@ function runAssertion(socket, message, options, onDone) {
       return;
     }
     try {
-      const responseJson = options.assertMode === "python"
-        ? clientAssertionResponseJson(prepared, stdout.toString("utf8"))
-        : assertionResponseJson(prepared, stdout.toString("utf8"));
+      const responseJson = clientAssertionResponseJson(
+        prepared, stdout.toString("utf8"));
       console.error(`request ${prepared.requestId}: assertion completed`);
       finalize({
         version: PROTOCOL_VERSION,
@@ -464,8 +402,7 @@ function runAssertion(socket, message, options, onDone) {
       });
     }
   });
-  child.stdin.end(options.assertMode === "python"
-    ? prepared.clientInput : prepared.input);
+  child.stdin.end(prepared.clientInput);
 }
 
 export function runExporter(options) {
@@ -537,7 +474,7 @@ export function runExporter(options) {
       console.error(`message type=${String(message?.type)}`);
       if (message?.version === PROTOCOL_VERSION && message?.type === "hello") {
         try {
-          discoverSingleDevice(options.tokenBinary);
+          discoverSingleDevice(options.assertBinary);
           send(socket, {version: PROTOCOL_VERSION, type: "hello", ready: true});
         } catch (error) {
           console.error(error.message);
@@ -577,7 +514,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const server = runExporter(parseArguments(process.argv.slice(2)));
     server.once("error", () => { process.exitCode = 1; });
   } catch (error) {
-    console.error(`usage: exporter.mjs --listen ADDRESS --allow-client TAILSCALE_IP [--port ${DEFAULT_PORT}] [--proxy-protocol 1] [--assert-mode c|python] [--assert-helper PATH] [--assert-client PATH] [--python PATH] [--attempts 1-5]`);
+    console.error(`usage: exporter.mjs --listen ADDRESS --allow-client TAILSCALE_IP [--port ${DEFAULT_PORT}] [--proxy-protocol 1] [--assert-mode swift|python] [--assert-helper PATH] [--assert-client PATH] [--python PATH]`);
     console.error(error.message);
     process.exit(64);
   }
