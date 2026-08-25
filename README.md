@@ -35,7 +35,7 @@ derived from Chromium's documented proxy API and Yubico's public FIDO2 API.
 - raw WebAuthn authenticator data rather than libfido2 CLI's CBOR wrapper; and
 - fail-closed detach when the exporter is not reachable.
 
-The v0.3.0 prototype intentionally rejects registration, cross-origin iframes,
+The v0.3.1 prototype intentionally rejects registration, cross-origin iframes,
 discoverable requests without an allow-credential ID, more than 16 credential
 IDs, and WebAuthn extensions other than `remoteDesktopClientOverride`. Those
 are honest missing surfaces, not silently downgraded operations.
@@ -58,20 +58,22 @@ assertion remains the acceptance test.
 
 ## Run on the Mac holding the YubiKey
 
-Install Homebrew `libfido2`, create the pinned Python environment, insert
-exactly one YubiKey, and start the exporter from a visible Terminal so the
-client can obtain a PIN from `/dev/tty`:
+Install Homebrew `libfido2`, insert exactly one YubiKey, then preview and apply
+the exporter installation. Every installation creates the lowercase
+`~/bin/remote-fido` command; `--desktop` also creates a double-clickable
+launcher:
 
 ```sh
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-tailscale serve --bg --yes --tcp=9471 --proxy-protocol=1 tcp://127.0.0.1:9471
-REMOTE_FIDO_ASSERT_MODE=python REMOTE_FIDO_PYTHON="$PWD/.venv/bin/python" \
-  node exporter.mjs \
-  --listen 127.0.0.1 \
-  --proxy-protocol 1 \
-  --allow-client 100.81.150.46
+./install-exporter.sh --allow-client 100.81.150.46 --desktop
+./install-exporter.sh --allow-client 100.81.150.46 --desktop --apply
 ```
+
+The installer warns and stops without changing files when a newer version is
+already installed. Run `~/bin/remote-fido`, or launch **Remote FIDO Exporter**
+from the Desktop. Its visible Terminal owns the PIN and touch prompts.
+Control-C stops the exporter; the Chrome extension then detaches fail-closed.
+The Tailscale Serve rule may remain configured, but its loopback target is
+closed while the exporter is stopped.
 
 For one bounded diagnostic run, set `REMOTE_FIDO_DEBUG=1` before starting the
 exporter. The Python client then enables protocol diagnostics on stderr. Do
@@ -124,7 +126,7 @@ The wire message is deliberately WebAuthn-level rather than USB-level. A
 foreground iPhone app can replace `exporter.mjs`, validate the same origin/RP
 tuple, and execute the assertion through Yubico's Apache-2.0 YubiKit using NFC
 where supported. User presence remains required for every ceremony. That
-variant is not implemented or claimed working in v0.3.0.
+variant is not implemented or claimed working in v0.3.1.
 
 ## Live acceptance result
 
@@ -134,5 +136,11 @@ Google as `artus@lytiq.de`. It forwarded Chrome's four allowed credential IDs
 over Tailscale to Tidepool. The Python client accepted the local YubiKey PIN,
 emitted its touch prompt from the authenticator keepalive, consumed one touch
 on Yubi1, returned the selected assertion to Chrome, and Agent-01 reached the
-signed-in ChatGPT home page. This is a live end-to-end acceptance result, not a
-synthetic WebAuthn probe.
+signed-in ChatGPT home page.
+
+The same day, the packaged v0.3.1 exporter on Tintagel repeated the complete
+flow with Yubi2. Its exact-peer filter accepted only Agent-01 at
+`100.120.158.10`; the exporter logged `assertion completed`, and Agent-01 again
+reached the signed-in ChatGPT Pro home for the same LYTiQ account. The exporter
+was then stopped and its loopback listener verified closed. Both results are
+live end-to-end acceptance tests, not synthetic WebAuthn probes.
