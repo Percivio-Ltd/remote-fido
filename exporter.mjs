@@ -264,7 +264,7 @@ export function parseArguments(argv) {
       path.join(currentDirectory, "build", "remote-fido-assert"),
     assertClient: process.env.REMOTE_FIDO_ASSERT_CLIENT ??
       path.join(currentDirectory, "assert-client.py"),
-    assertMode: process.env.REMOTE_FIDO_ASSERT_MODE ?? "c",
+    assertMode: process.env.REMOTE_FIDO_ASSERT_MODE ?? "python",
     pythonBinary: process.env.REMOTE_FIDO_PYTHON ?? "python3",
     tokenBinary: process.env.FIDO2_TOKEN_BIN ?? "fido2-token",
     proxyProtocol: false,
@@ -310,7 +310,25 @@ export function parseArguments(argv) {
 }
 
 function send(socket, value) {
-  socket.end(encodeFrame(value));
+  if (socket.destroyed || !socket.writable || socket.writableEnded) return false;
+  try {
+    socket.end(encodeFrame(value));
+    return true;
+  } catch (error) {
+    console.error(`cannot send exporter response: ${error.message}`);
+    socket.destroy();
+    return false;
+  }
+}
+
+export function terminateChild(child, graceMs = 3000) {
+  if (child.exitCode !== null || child.signalCode !== null) return () => {};
+  child.kill("SIGTERM");
+  const escalation = setTimeout(() => {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+  }, graceMs);
+  escalation.unref?.();
+  return () => clearTimeout(escalation);
 }
 
 function runAssertion(socket, message, options, onDone) {
@@ -363,27 +381,46 @@ function runAssertion(socket, message, options, onDone) {
     stdio: ["pipe", "pipe", "inherit"],
   });
   let stdout = Buffer.alloc(0);
-  let settled = false;
-  const finish = response => {
-    if (settled) return;
-    settled = true;
+  let finalized = false;
+  let cancelled = false;
+  let cancelEscalation = () => {};
+  const finalize = response => {
+    if (finalized) return;
+    finalized = true;
     clearTimeout(timer);
+    cancelEscalation();
     socket.off("close", cancel);
-    send(socket, response);
+    if (response && !cancelled) send(socket, response);
     onDone();
   };
   const cancel = () => {
-    if (!settled) child.kill("SIGTERM");
+    if (finalized || cancelled) return;
+    cancelled = true;
+    clearTimeout(timer);
+    console.error(`request ${prepared.requestId}: transport canceled`);
+    cancelEscalation = terminateChild(child);
   };
-  const timer = setTimeout(() => child.kill("SIGTERM"), prepared.timeoutMs + 5_000);
+  const timer = setTimeout(() => {
+    if (finalized) return;
+    console.error(`request ${prepared.requestId}: local assertion timed out`);
+    cancelEscalation = terminateChild(child);
+  }, prepared.timeoutMs + 5_000);
   socket.once("close", cancel);
   child.stdout.on("data", chunk => {
     stdout = Buffer.concat([stdout, chunk]);
-    if (stdout.length > 1024 * 1024) child.kill("SIGTERM");
+    if (stdout.length > 1024 * 1024) {
+      console.error(`request ${prepared.requestId}: assertion output exceeded limit`);
+      cancelEscalation = terminateChild(child);
+    }
+  });
+  child.stdin.on("error", error => {
+    if (!cancelled) {
+      console.error(`request ${prepared.requestId}: assertion input failed: ${error.message}`);
+    }
   });
   child.once("error", error => {
     console.error(`request ${prepared.requestId}: cannot run assertion helper: ${error.message}`);
-    finish({
+    finalize({
       version: PROTOCOL_VERSION,
       type: "response",
       requestId: prepared.requestId,
@@ -391,10 +428,14 @@ function runAssertion(socket, message, options, onDone) {
     });
   });
   child.once("exit", code => {
-    if (settled) return;
+    if (finalized) return;
+    if (cancelled) {
+      finalize(null);
+      return;
+    }
     if (code !== 0) {
       console.error(`request ${prepared.requestId}: assertion helper exited ${code}`);
-      finish({
+      finalize({
         version: PROTOCOL_VERSION,
         type: "response",
         requestId: prepared.requestId,
@@ -407,7 +448,7 @@ function runAssertion(socket, message, options, onDone) {
         ? clientAssertionResponseJson(prepared, stdout.toString("utf8"))
         : assertionResponseJson(prepared, stdout.toString("utf8"));
       console.error(`request ${prepared.requestId}: assertion completed`);
-      finish({
+      finalize({
         version: PROTOCOL_VERSION,
         type: "response",
         requestId: prepared.requestId,
@@ -415,7 +456,7 @@ function runAssertion(socket, message, options, onDone) {
       });
     } catch (error) {
       console.error(`request ${prepared.requestId}: invalid assertion output: ${error.message}`);
-      finish({
+      finalize({
         version: PROTOCOL_VERSION,
         type: "response",
         requestId: prepared.requestId,
@@ -431,6 +472,15 @@ export function runExporter(options) {
   let busy = false;
   const server = net.createServer(socket => {
     console.error(`connection from ${socket.remoteAddress ?? "<unknown>"}`);
+    socket.on("error", error => {
+      console.error(`client socket error: ${error.message}`);
+    });
+    socket.setTimeout(15_000, () => {
+      if (!socket.destroyed) {
+        console.error("client socket timed out before a request completed");
+        socket.destroy();
+      }
+    });
     if (!options.proxyProtocol && socket.remoteAddress !== options.allowClient) {
       console.error(`rejected peer ${socket.remoteAddress ?? "<unknown>"}`);
       socket.destroy();
@@ -482,6 +532,7 @@ export function runExporter(options) {
       }
       if (messages.length !== 1) return;
       handled = true;
+      socket.setTimeout(0);
       const message = messages[0];
       console.error(`message type=${String(message?.type)}`);
       if (message?.version === PROTOCOL_VERSION && message?.type === "hello") {
@@ -511,12 +562,20 @@ export function runExporter(options) {
     console.error(`remote FIDO exporter listening on ${options.listen}:${options.port}`);
     console.error("PIN entry and touch remain local to this Mac");
   });
+  server.on("error", error => {
+    if (error.code === "EADDRINUSE") {
+      console.error(`remote FIDO exporter is already running on ${options.listen}:${options.port}`);
+    } else {
+      console.error(`remote FIDO exporter listener failed: ${error.message}`);
+    }
+  });
   return server;
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
-    runExporter(parseArguments(process.argv.slice(2)));
+    const server = runExporter(parseArguments(process.argv.slice(2)));
+    server.once("error", () => { process.exitCode = 1; });
   } catch (error) {
     console.error(`usage: exporter.mjs --listen ADDRESS --allow-client TAILSCALE_IP [--port ${DEFAULT_PORT}] [--proxy-protocol 1] [--assert-mode c|python] [--assert-helper PATH] [--assert-client PATH] [--python PATH] [--attempts 1-5]`);
     console.error(error.message);

@@ -9,6 +9,7 @@ import getpass
 import json
 import logging
 import os
+import signal
 import sys
 import threading
 from typing import Any
@@ -23,6 +24,14 @@ from fido2.ctap import CtapError
 from fido2.ctap2.pin import ClientPin
 from fido2.hid import CtapHidDevice
 from fido2.webauthn import PublicKeyCredentialRequestOptions
+
+
+class AssertionCancelled(Exception):
+    """Raised on supervised shutdown so getpass can restore Terminal state."""
+
+
+def handle_cancel(_signum: int, _frame: object) -> None:
+    raise AssertionCancelled("remote ceremony was canceled")
 
 
 class LocalInteraction(UserInteraction):
@@ -80,12 +89,26 @@ def pin_invalid(error: Exception) -> bool:
     )
 
 
+def pin_blocked(error: Exception) -> bool:
+    if not (
+        isinstance(error, ClientError)
+        and isinstance(error.cause, CtapError)
+    ):
+        return False
+    blocked_codes = {
+        getattr(CtapError.ERR, "PIN_BLOCKED", None),
+        getattr(CtapError.ERR, "PIN_AUTH_BLOCKED", None),
+    }
+    return error.cause.code in blocked_codes
+
+
 def main() -> int:
     args = parse_args()
     if not 30_000 <= args.timeout_ms <= 300_000:
         raise ValueError("timeout must be between 30000 and 300000 ms")
     if os.environ.get("REMOTE_FIDO_DEBUG"):
         logging.basicConfig(level=logging.DEBUG)
+    signal.signal(signal.SIGTERM, handle_cancel)
 
     payload = json.load(sys.stdin)
     if not isinstance(payload, dict) or not isinstance(payload.get("origin"), str):
@@ -114,6 +137,14 @@ def main() -> int:
                 selection = client.get_assertion(options, event)
                 break
             except ClientError as error:
+                if pin_blocked(error):
+                    print(
+                        "The YubiKey has temporarily blocked PIN authentication. "
+                        "Unplug and reinsert it before trying again.",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    raise
                 if not pin_invalid(error) or interaction.pin_prompts >= 3:
                     raise
                 backend = getattr(client, "_backend", None)
@@ -145,6 +176,9 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
+    except AssertionCancelled as error:
+        print(f"assertion client canceled: {error}", file=sys.stderr)
+        raise SystemExit(2)
     except Exception as error:
         print(f"assertion client failed: {type(error).__name__}: {error}",
               file=sys.stderr)

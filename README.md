@@ -1,4 +1,13 @@
-# Remote FIDO custom proxy prototype
+# Remote FIDO
+
+The canonical source and installation instructions are published at
+<https://github.com/Percivio-Ltd/remote-fido>. Clone that repository on the Mac
+holding the YubiKey and on each Tart VM before running the installers below:
+
+```sh
+git clone https://github.com/Percivio-Ltd/remote-fido.git
+cd remote-fido
+```
 
 This prototype avoids both general USB passthrough and macOS virtual HID. A
 small Chrome extension in the Tart VM attaches through Chrome's public
@@ -32,10 +41,13 @@ derived from Chromium's documented proxy API and Yubico's public FIDO2 API.
   prompt emitted only when the authenticator actually requests presence;
 - up to three local PIN prompts after a wrong PIN, but only while the key
   reports more than one retry remaining;
-- raw WebAuthn authenticator data rather than libfido2 CLI's CBOR wrapper; and
-- fail-closed detach when the exporter is not reachable.
+- raw WebAuthn authenticator data rather than libfido2 CLI's CBOR wrapper;
+- fail-closed detach when the exporter is not reachable;
+- automatic reattachment after the exporter or network returns, without a
+  Chrome restart; and
+- a visible toolbar badge: `ON`, `KEY`, `OK`, `OFF`, or `ERR`.
 
-The v0.3.1 prototype intentionally rejects registration, cross-origin iframes,
+The v0.3.2 release intentionally rejects registration, cross-origin iframes,
 discoverable requests without an allow-credential ID, more than 16 credential
 IDs, and WebAuthn extensions other than `remoteDesktopClientOverride`. Those
 are honest missing surfaces, not silently downgraded operations.
@@ -43,7 +55,7 @@ are honest missing surfaces, not silently downgraded operations.
 ## Test without touching a key
 
 ```sh
-node --test test.mjs
+node --test test.mjs extension/service-worker.test.mjs exporter-lifecycle.test.mjs
 ./build-assert-helper.sh
 ./build/remote-fido-assert --touch-test-u2f "$(fido2-token -L | sed 's/: .*//')"
 ```
@@ -117,8 +129,11 @@ The expected response is `{"version":1,"type":"hello","ready":true}`.
 
 Loading this extension from `chrome://extensions` is security-sensitive: while
 the exporter is connected it becomes Chrome's WebAuthn request proxy. The
-extension detaches when its native connection ends, but the source and exact
-permissions should be reviewed before the one-time **Load unpacked** action.
+extension detaches when its native connection or exporter disappears and
+automatically reattaches when both return. Click its toolbar icon for an
+immediate health check; the background health check otherwise detects recovery
+within about five seconds. The source and exact permissions should be reviewed
+before the one-time **Load unpacked** action.
 
 ## iPhone direction
 
@@ -126,7 +141,7 @@ The wire message is deliberately WebAuthn-level rather than USB-level. A
 foreground iPhone app can replace `exporter.mjs`, validate the same origin/RP
 tuple, and execute the assertion through Yubico's Apache-2.0 YubiKit using NFC
 where supported. User presence remains required for every ceremony. That
-variant is not implemented or claimed working in v0.3.1.
+variant is not implemented or claimed working in v0.3.2.
 
 ## Live acceptance result
 
@@ -144,3 +159,12 @@ flow with Yubi2. Its exact-peer filter accepted only Agent-01 at
 reached the signed-in ChatGPT Pro home for the same LYTiQ account. The exporter
 was then stopped and its loopback listener verified closed. Both results are
 live end-to-end acceptance tests, not synthetic WebAuthn probes.
+
+The v0.3.2 stability release was then installed byte-for-byte on Tintagel and
+Agent-01. A cold start attached automatically, stopping the exporter detached
+the proxy within one health interval, and restarting it reattached without a
+Chrome reload or toolbar click. A fresh Google login for `artus@lytiq.de`
+completed a real OpenAI assertion with local PIN and one Yubi2 touch. Afterward
+the exporter was stopped again; TCP 9471 was closed and Agent-01 visibly
+returned to `OFF`. The older v0.3.1 installer also warned and stopped against
+the installed v0.3.2 target without changing it.

@@ -1,7 +1,8 @@
 {
   "manifest_version": 3,
+  "minimum_chrome_version": "115",
   "name": "LYTiQ Remote FIDO",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Forwards Chrome WebAuthn assertions to one operator-controlled FIDO key over Tailscale.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmft3QXGhgvrLOp9mxt1r44AIBG+FC0p167vopXHxmYoj0AglXXw9C+8vEQOgHV5bCOCpF/8mOOlFgmqYCyz3h2p2xJjSVVM1LuF7vbqYJl4tVA2ihB1VY0SsjvIE37pczhsitLyhykNaWjVfrG00LM9NMP5xtwHlULGxxif1VHNHDeaD6hgGsHcr4PQTHHxfjFmsWALHroD1hsGpWs4z3CcvSE/uDrbzIxvwAYakCq5Xj+a2rK3+7F3+TpfUUVwQ0DFF1wbOE5qSK54bJfULYlMjZISDoezZwAo2luGZjiCEMXsCrwZlr0GjNerxRvbpBETGFYhmV1mfSR6vNvnc9QIDAQAB",
   "permissions": [
