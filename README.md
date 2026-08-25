@@ -101,6 +101,10 @@ The authenticator's approximately 29-second presence timeout is one attempt:
 v0.4.0 does not silently restart a timed-out assertion inside Chrome's longer
 outer deadline.
 
+Idle health checks are silent. The exporter Terminal reports an assertion
+request and any authenticator availability or identity switch, without logging
+the five-second hello probes.
+
 The installer verifies `build/remote-fido-assert` against `SHA256SUMS` before
 copying it. The checked-in universal binary is ad-hoc signed for the internal
 `git clone` installation path. A downloadable quarantined release archive will

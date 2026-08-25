@@ -189,6 +189,15 @@ export function discoverSingleDevice(assertBinary) {
   return devices[0].slice(0, separator);
 }
 
+export function describeAuthenticatorTransition(previous, current, detail = "") {
+  if (previous === undefined || previous === current) return null;
+  if (current === null) {
+    return `remote FIDO key unavailable${detail ? `: ${detail}` : ""}`;
+  }
+  if (previous === null) return `remote FIDO key available: ${current}`;
+  return `remote FIDO key switched: ${previous} -> ${current}`;
+}
+
 export function parseProxyV1Header(buffer) {
   const end = buffer.indexOf("\r\n");
   if (end < 0) {
@@ -407,8 +416,14 @@ function runAssertion(socket, message, options, onDone) {
 
 export function runExporter(options) {
   let busy = false;
+  let healthDevice;
+  const recordHealthDevice = (current, detail = "") => {
+    const transition = describeAuthenticatorTransition(
+      healthDevice, current, detail);
+    healthDevice = current;
+    if (transition) console.error(transition);
+  };
   const server = net.createServer(socket => {
-    console.error(`connection from ${socket.remoteAddress ?? "<unknown>"}`);
     socket.on("error", error => {
       console.error(`client socket error: ${error.message}`);
     });
@@ -431,6 +446,7 @@ export function runExporter(options) {
     const decoder = new FrameDecoder();
     let handled = false;
     let peerValidated = !options.proxyProtocol;
+    let peerAddress = socket.remoteAddress ?? "<unknown>";
     let proxyBuffer = Buffer.alloc(0);
     socket.on("data", incoming => {
       let chunk = incoming;
@@ -450,7 +466,7 @@ export function runExporter(options) {
           socket.destroy();
           return;
         }
-        console.error(`accepted PROXY peer ${parsed.source}`);
+        peerAddress = parsed.source;
         peerValidated = true;
         proxyBuffer = Buffer.alloc(0);
         chunk = parsed.rest;
@@ -471,17 +487,19 @@ export function runExporter(options) {
       handled = true;
       socket.setTimeout(0);
       const message = messages[0];
-      console.error(`message type=${String(message?.type)}`);
       if (message?.version === PROTOCOL_VERSION && message?.type === "hello") {
         try {
-          discoverSingleDevice(options.assertBinary);
+          const device = discoverSingleDevice(options.assertBinary);
+          recordHealthDevice(device);
           send(socket, {version: PROTOCOL_VERSION, type: "hello", ready: true});
         } catch (error) {
-          console.error(error.message);
+          recordHealthDevice(null, error.message);
           send(socket, {version: PROTOCOL_VERSION, type: "hello", ready: false});
         }
         return;
       }
+      console.error(
+        `connection from ${peerAddress}; message type=${String(message?.type)}`);
       if (busy) {
         send(socket, {
           version: PROTOCOL_VERSION,

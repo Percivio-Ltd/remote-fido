@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   clientAssertionResponseJson,
+  describeAuthenticatorTransition,
   parseArguments,
   parseProxyV1Header,
   prepareAssertion,
@@ -12,6 +13,24 @@ import {
   encodeFrame,
   isTailscaleIPv4,
 } from "./protocol.mjs";
+
+test("idle health pings stay silent while authenticator switches remain visible", () => {
+  assert.equal(
+    describeAuthenticatorTransition(undefined, "ioreg://key-a"), null);
+  assert.equal(
+    describeAuthenticatorTransition("ioreg://key-a", "ioreg://key-a"), null);
+  assert.equal(
+    describeAuthenticatorTransition("ioreg://key-a", null, "key missing"),
+    "remote FIDO key unavailable: key missing");
+  assert.equal(
+    describeAuthenticatorTransition(null, null, "still missing"), null);
+  assert.equal(
+    describeAuthenticatorTransition(null, "ioreg://key-b"),
+    "remote FIDO key available: ioreg://key-b");
+  assert.equal(
+    describeAuthenticatorTransition("ioreg://key-b", "ioreg://key-c"),
+    "remote FIDO key switched: ioreg://key-b -> ioreg://key-c");
+});
 
 const request = {
   version: PROTOCOL_VERSION,
