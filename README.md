@@ -103,7 +103,7 @@ outer deadline.
 
 Idle health checks are silent. The exporter Terminal reports an assertion
 request and any authenticator availability or identity switch, without logging
-the five-second hello probes.
+the five-second hello probes, including probes from a previously selected VM.
 
 The installer verifies `build/remote-fido-assert` against `SHA256SUMS` before
 copying it. The checked-in universal binary is ad-hoc signed for the internal

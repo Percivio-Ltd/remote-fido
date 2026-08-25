@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   clientAssertionResponseJson,
   describeAuthenticatorTransition,
+  describeRejectedProxyPeer,
   parseArguments,
   parseProxyV1Header,
   prepareAssertion,
@@ -30,6 +31,17 @@ test("idle health pings stay silent while authenticator switches remain visible"
   assert.equal(
     describeAuthenticatorTransition("ioreg://key-b", "ioreg://key-c"),
     "remote FIDO key switched: ioreg://key-b -> ioreg://key-c");
+});
+
+test("rejected idle probes are silent but rejected requests remain visible", () => {
+  assert.equal(describeRejectedProxyPeer("100.64.0.2", {
+    version: PROTOCOL_VERSION,
+    type: "hello",
+  }), null);
+  assert.equal(describeRejectedProxyPeer("100.64.0.2", {
+    version: PROTOCOL_VERSION,
+    type: "get",
+  }), "rejected PROXY peer 100.64.0.2; message type=get");
 });
 
 const request = {

@@ -198,6 +198,13 @@ export function describeAuthenticatorTransition(previous, current, detail = "") 
   return `remote FIDO key switched: ${previous} -> ${current}`;
 }
 
+export function describeRejectedProxyPeer(source, message) {
+  if (message?.version === PROTOCOL_VERSION && message?.type === "hello") {
+    return null;
+  }
+  return `rejected PROXY peer ${source}; message type=${String(message?.type)}`;
+}
+
 export function parseProxyV1Header(buffer) {
   const end = buffer.indexOf("\r\n");
   if (end < 0) {
@@ -447,6 +454,7 @@ export function runExporter(options) {
     let handled = false;
     let peerValidated = !options.proxyProtocol;
     let peerAddress = socket.remoteAddress ?? "<unknown>";
+    let rejectedProxyPeer = false;
     let proxyBuffer = Buffer.alloc(0);
     socket.on("data", incoming => {
       let chunk = incoming;
@@ -461,12 +469,8 @@ export function runExporter(options) {
           return;
         }
         if (!parsed) return;
-        if (parsed.source !== options.allowClient) {
-          console.error(`rejected PROXY peer ${parsed.source}`);
-          socket.destroy();
-          return;
-        }
         peerAddress = parsed.source;
+        rejectedProxyPeer = parsed.source !== options.allowClient;
         peerValidated = true;
         proxyBuffer = Buffer.alloc(0);
         chunk = parsed.rest;
@@ -487,6 +491,12 @@ export function runExporter(options) {
       handled = true;
       socket.setTimeout(0);
       const message = messages[0];
+      if (rejectedProxyPeer) {
+        const rejection = describeRejectedProxyPeer(peerAddress, message);
+        if (rejection) console.error(rejection);
+        socket.destroy();
+        return;
+      }
       if (message?.version === PROTOCOL_VERSION && message?.type === "hello") {
         try {
           const device = discoverSingleDevice(options.assertBinary);
