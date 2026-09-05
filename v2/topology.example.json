@@ -1,0 +1,12 @@
+{
+  "coordinator": "https://tidepool.tailbb0f71.ts.net:9472",
+  "coordinatorPort": 19472,
+  "extensionOrigins": ["chrome-extension://hccloojihlmnnpmdkknnloknfbbbelba"],
+  "rpOrigins": {
+    "https://accounts.google.com": {"page": "https://accounts.google.com/robots.txt", "rpIds": ["google.com", "accounts.google.com"]}
+  },
+  "devices": {
+    "tintagel": {"name": "Tintagel", "roles": ["target"], "endpoint": "https://tintagel.tailbb0f71.ts.net:9473", "port": 19473},
+    "nimue": {"name": "Nimue", "roles": ["approver"], "targets": ["tintagel"]}
+  }
+}

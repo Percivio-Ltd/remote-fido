@@ -1,0 +1,11 @@
+{
+  "name": "remote-fido",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test test.mjs extension/service-worker.test.mjs exporter-lifecycle.test.mjs v2/*.test.mjs",
+    "test:browser": "node tests/browser/approver.test.mjs"
+  },
+  "devDependencies": { "playwright": "1.58.2" }
+}

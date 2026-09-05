@@ -1,5 +1,15 @@
 # Remote FIDO
 
+## Selected Apple-passkey approvers (0.5 prototype)
+
+The new, separately installed `v2/` path supports explicit approver selection
+on Tidepool, target requests on Tintagel, and local Apple-passkey approval on
+Nimue. It forwards WebAuthn requests and assertions—not fingerprints. See the
+[architecture](docs/ARCHITECTURE-0.5.md) and [setup / acceptance guide](docs/SETUP-0.5.md).
+The existing 0.4 YubiKey implementation below remains unchanged and usable.
+
+## Existing YubiKey path (0.4)
+
 The canonical source and installation instructions are published at
 <https://github.com/Percivio-Ltd/remote-fido>. Clone that repository on the Mac
 holding the YubiKey and on each Tart VM before running the installers below:
