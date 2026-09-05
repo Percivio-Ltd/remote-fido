@@ -9,6 +9,13 @@ git clone https://github.com/Percivio-Ltd/remote-fido.git
 cd remote-fido
 ```
 
+This repository owns the implementation, tests, installers, and release
+artifacts. Develop and publish changes here. The `ai-software-engineering`
+Ops repository consumes a pinned commit through its
+`Ops/tart/remote-fido-prototype/custom-proxy` Git submodule; it does not maintain
+a separate source copy. Updating that submodule selects a rollout revision
+and does not deploy it to any machine.
+
 This prototype avoids both general USB passthrough and macOS virtual HID. A
 small Chrome extension in the Tart VM attaches through Chrome's public
 `webAuthenticationProxy` API. Its native host sends only one WebAuthn assertion
