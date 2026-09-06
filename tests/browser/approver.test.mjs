@@ -17,7 +17,9 @@ await fs.writeFile(path.join(fixture, 'manifest.json'), JSON.stringify({manifest
   permissions: ['scripting', 'tabs'], host_permissions: ['http://localhost/*'], background: {service_worker: 'worker.js', type: 'module'}}));
 await fs.writeFile(path.join(fixture, 'worker.js'), `import {ceremony,cancelCeremony} from './ceremony.js';
 globalThis.run = (target, request) => chrome.scripting.executeScript({target, world:'ISOLATED',func:ceremony,args:[request]});
-globalThis.cancel = (target, id) => chrome.scripting.executeScript({target,world:'ISOLATED',func:cancelCeremony,args:[id]});`);
+globalThis.cancel = (target, id) => chrome.scripting.executeScript({target,world:'ISOLATED',func:cancelCeremony,args:[id]});
+globalThis.mobileResults=[];
+chrome.runtime.onMessage.addListener((m,sender,reply)=>{if(m.type==='mobile-pulse')reply({state:'started'});if(m.type==='mobile-finish'){globalThis.mobileResults.push({m,sender});reply({ok:true});}});`);
 const server = http.createServer((req, res) => res.end('<title>Local test RP</title>'));
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const origin = `http://localhost:${server.address().port}`;
@@ -61,6 +63,27 @@ try {
   await page.goto(`${origin}/new`);
   await assert.rejects(worker.evaluate(({target, request}) => globalThis.run(target, request), {target, request}));
   console.log('PASS: cancellation aborts ceremony; mismatched origin and stale document ID cannot sign.');
+  await page.goto(`${origin}/`);
+  const [mobileProbe] = await worker.evaluate(tabId => chrome.scripting.executeScript({target: {tabId}, func: () => location.href}), tabId);
+  const mobileTarget = {tabId, documentIds: [mobileProbe.documentId]};
+  const mobile = {...request, id: crypto.randomUUID(), expires: Date.now() + 15000, mobileNonce: crypto.randomUUID()};
+  const mounted = await worker.evaluate(({target, request}) => globalThis.run(target, request), {target: mobileTarget, request: mobile});
+  assert.equal(mounted[0].result.mounted, true, 'Mobile mount must return before a biometric gesture');
+  await page.locator('div').waitFor(); await page.keyboard.press('Tab'); await page.keyboard.press('Enter');
+  let delivered;
+  for (let i = 0; i < 50; i++) {
+    delivered = await worker.evaluate(() => globalThis.mobileResults[0]); if (delivered) break;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  assert.ok(delivered?.m?.outcome?.result, JSON.stringify(delivered));
+  assert.equal(delivered.m.nonce, mobile.mobileNonce);
+  assert.equal(delivered.sender.documentId, mobileProbe.documentId);
+  assert.equal(delivered.sender.tab.id, tabId);
+  const mobileResult = delivered.m.outcome.result; validateAssertion(mobile, mobileResult);
+  assert.ok(crypto.verify('sha256', Buffer.concat([Buffer.from(mobileResult.response.authenticatorData, 'base64url'),
+    crypto.createHash('sha256').update(Buffer.from(mobileResult.response.clientDataJSON, 'base64url')).digest()]), publicKey,
+    Buffer.from(mobileResult.response.signature, 'base64url')));
+  console.log('PASS: mobile event delivery completes from RP tab without dashboard; exact sender identity and signature verified (Chrome virtual authenticator, not Safari hardware).');
 } finally {
   await context?.close(); await new Promise(resolve => server.close(resolve)); await fs.rm(temporary, {recursive: true, force: true});
 }

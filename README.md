@@ -6,6 +6,8 @@ The new, separately installed `v2/` path supports explicit approver selection
 on Tidepool, target requests on Tintagel, and local Apple-passkey approval on
 Nimue. It forwards WebAuthn requests and assertions—not fingerprints. See the
 [architecture](docs/ARCHITECTURE-0.5.md) and [setup / acceptance guide](docs/SETUP-0.5.md).
+The [iPhone/iPad approver](docs/IOS-APPROVER.md) has a separate mobile Safari
+execution path; signing and hardware acceptance are still pending.
 The existing 0.4 YubiKey implementation below remains unchanged and usable.
 
 ## Existing YubiKey path (0.4)

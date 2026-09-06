@@ -16,9 +16,13 @@ fs.mkdirSync(path.join(out, 'RemoteFIDO.xcodeproj'), {recursive: true});
 const source = path.join(repo, 'v2/approver-extension');
 const files = ['app.html', 'app.css', 'app.js', 'ceremony.js', 'request.js', 'worker.js'];
 for (const file of files) fs.copyFileSync(path.join(source, file), path.join(out, 'Resources', file));
-for (const file of ['launch.html', 'launch.js']) fs.copyFileSync(path.join(repo, 'v2/ios', file), path.join(out, 'Resources', file));
+const mobileFiles = ['launch.html', 'launch.js', 'mobile-app.js', 'mobile.css', 'mobile-worker.js', 'mobile-controller.js'];
+for (const file of mobileFiles) fs.copyFileSync(path.join(repo, 'v2/ios', file), path.join(out, 'Resources', file));
+fs.copyFileSync(path.join(repo, 'v2/ios/mobile-app.html'), path.join(out, 'Resources/app.html'));
+fs.writeFileSync(path.join(out, 'Resources/mobile-controller.js'), fs.readFileSync(path.join(repo, 'v2/ios/mobile-controller.js'), 'utf8').replaceAll('../approver-extension/', './'));
 const manifest = JSON.parse(fs.readFileSync(path.join(source, 'manifest.json')));
-delete manifest.key; manifest.background = {scripts: ['worker.js'], type: 'module'};
+delete manifest.key; manifest.background = {scripts: ['mobile-worker.js'], type: 'module'};
+manifest.version = '0.5.1'; manifest.permissions = ['storage', 'scripting', 'tabs'];
 manifest.action.default_popup = 'launch.html';
 fs.writeFileSync(path.join(out, 'Resources/manifest.json'), JSON.stringify(manifest, null, 2));
 for (const file of ['RemoteFIDOApp.swift', 'SafariWebExtensionHandler.swift']) fs.copyFileSync(path.join(repo, 'v2/ios', file), path.join(out, file));
@@ -32,7 +36,7 @@ function xml(value) {
 }
 const plist = v => `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0">${xml(v)}</plist>`;
 fs.writeFileSync(path.join(out, 'Extension-Info.plist'), plist({CFBundleDisplayName: 'Remote FIDO', CFBundleIdentifier: '$(PRODUCT_BUNDLE_IDENTIFIER)',
-  CFBundleExecutable: '$(EXECUTABLE_NAME)', CFBundleName: '$(PRODUCT_NAME)', CFBundlePackageType: 'XPC!', CFBundleShortVersionString: '0.5.0', CFBundleVersion: '1',
+  CFBundleExecutable: '$(EXECUTABLE_NAME)', CFBundleName: '$(PRODUCT_NAME)', CFBundlePackageType: 'XPC!', CFBundleShortVersionString: '0.5.1', CFBundleVersion: '2',
   NSExtension: {NSExtensionPointIdentifier: 'com.apple.Safari.web-extension', NSExtensionPrincipalClass: '$(PRODUCT_MODULE_NAME).SafariWebExtensionHandler'}}));
 const objects = {}; const id = name => crypto.createHash('sha256').update(name).digest('hex').slice(0, 24).toUpperCase();
 function object(name, value) { objects[id(name)] = value; return id(name); }
@@ -41,7 +45,7 @@ const appSwift = file('RemoteFIDOApp.swift', 'sourcecode.swift');
 const extSwift = file('SafariWebExtensionHandler.swift', 'sourcecode.swift');
 const appProduct = file('RemoteFIDO.app', 'wrapper.application', 'RemoteFIDO.app', 'BUILT_PRODUCTS_DIR');
 const extProduct = file('RemoteFIDOExtension.appex', 'wrapper.app-extension', 'RemoteFIDOExtension.appex', 'BUILT_PRODUCTS_DIR');
-const resources = [...files, 'launch.html', 'launch.js', 'manifest.json'].map(name => file(`resource-${name}`, name.endsWith('.json') ? 'text.json' : 'text', `Resources/${name}`));
+const resources = [...files, ...mobileFiles, 'manifest.json'].map(name => file(`resource-${name}`, name.endsWith('.json') ? 'text.json' : 'text', `Resources/${name}`));
 const buildFile = (name, ref, settings) => object(name, {isa: 'PBXBuildFile', fileRef: ref, ...(settings ? {settings} : {})});
 const phase = (name, isa, files, extra = {}) => object(name, {isa, buildActionMask: 2147483647, files, runOnlyForDeploymentPostprocessing: 0, ...extra});
 const appSources = phase('app-sources', 'PBXSourcesBuildPhase', [buildFile('app-swift', appSwift)]);
@@ -49,7 +53,7 @@ const extSources = phase('ext-sources', 'PBXSourcesBuildPhase', [buildFile('ext-
 const extResources = phase('ext-resources', 'PBXResourcesBuildPhase', resources.map((r, i) => buildFile(`res-${i}`, r)));
 const embed = phase('embed-extension', 'PBXCopyFilesBuildPhase', [buildFile('embed', extProduct, {ATTRIBUTES: ['RemoveHeadersOnCopy']})], {dstPath: '', dstSubfolderSpec: 13, name: 'Embed App Extensions'});
 const settings = {SDKROOT: 'iphoneos', IPHONEOS_DEPLOYMENT_TARGET: '17.0', SWIFT_VERSION: '5.0', TARGETED_DEVICE_FAMILY: '1,2',
-  CODE_SIGN_STYLE: 'Automatic', CURRENT_PROJECT_VERSION: '1', MARKETING_VERSION: '0.5.0', ENABLE_USER_SCRIPT_SANDBOXING: 'YES'};
+  CODE_SIGN_STYLE: 'Automatic', CURRENT_PROJECT_VERSION: '2', MARKETING_VERSION: '0.5.1', ENABLE_USER_SCRIPT_SANDBOXING: 'YES'};
 function configs(name, extra) {
   return object(`${name}-configs`, {isa: 'XCConfigurationList', defaultConfigurationIsVisible: 0, defaultConfigurationName: 'Debug',
     buildConfigurations: ['Debug', 'Release'].map(mode => object(`${name}-${mode}`, {isa: 'XCBuildConfiguration', name: mode,

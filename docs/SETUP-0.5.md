@@ -153,6 +153,10 @@ selection. Never substitute it for the Google acceptance test above.
 
 ## iOS Safari preparation
 
+For the subsequent mobile implementation, current blockers, enrollment and
+hardware acceptance, see [iPhone/iPad approver](IOS-APPROVER.md). The notes below
+describe the initial wrapper and its build prerequisites.
+
 `v2/ios/` contains a SwiftUI setup app, Safari Web Extension handler and launcher.
 `node v2/build-ios.mjs` generates a reproducible Xcode project under ignored
 `build/ios/`; the extension reuses the same approver JavaScript, with Safari's

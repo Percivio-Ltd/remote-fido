@@ -1,6 +1,38 @@
 // This function is serialized into an ISOLATED content world. Do not capture
 // extension secrets or send them to this page. Never execute it in MAIN.
 export async function ceremony(request) {
+  // On iOS the dashboard tab can be suspended after the RP tab opens. Mount
+  // synchronously, then deliver from the foreground content world via internal
+  // extension messages. No bearer credential or assignment ticket enters it.
+  if (request.mobileNonce) {
+    let pulsing = false;
+    const pulse = setInterval(async () => {
+      if (pulsing) return; pulsing = true;
+      try {
+        const reply = await chrome.runtime.sendMessage({type: 'mobile-pulse', id: request.id, nonce: request.mobileNonce});
+        if (reply?.state !== 'started') globalThis.__remoteFidoApprovalV2?.controller.abort();
+      } catch { globalThis.__remoteFidoApprovalV2?.controller.abort(); }
+      finally { pulsing = false; }
+    }, 1500);
+    const local = {...request}; delete local.mobileNonce;
+    // The function name is preserved when serialized by scripting.executeScript.
+    ceremony(local).then(async outcome => {
+      clearInterval(pulse);
+      let detail;
+      try {
+        const reply = await chrome.runtime.sendMessage({type: 'mobile-finish', id: request.id, nonce: request.mobileNonce, outcome});
+        if (!reply?.ok) throw new Error(reply?.error ?? 'Delivery not confirmed');
+        detail = outcome.error ? 'Approval cancelled. You can return to the Remote FIDO dashboard.' :
+          'Assertion delivered. Check the login on the target computer. You can return to the Remote FIDO dashboard.';
+      } catch { detail = 'Delivery was not confirmed. Return to the Remote FIDO dashboard. Do not repeat this approval; start a new login if necessary.'; }
+      if (location.href === request.page) {
+        const status = document.createElement('div'); status.textContent = detail;
+        status.style.cssText = 'position:fixed;inset:0;z-index:2147483647;padding:40px;background:#101b2c;color:white;font:20px system-ui';
+        document.documentElement.append(status);
+      }
+    });
+    return {mounted: true};
+  }
   const key = '__remoteFidoApprovalV2';
   if (location.origin !== request.origin || location.href !== request.page || window !== top)
     return {error: 'Approval document changed'};
