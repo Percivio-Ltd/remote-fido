@@ -53,7 +53,7 @@ const extSources = phase('ext-sources', 'PBXSourcesBuildPhase', [buildFile('ext-
 const extResources = phase('ext-resources', 'PBXResourcesBuildPhase', resources.map((r, i) => buildFile(`res-${i}`, r)));
 const embed = phase('embed-extension', 'PBXCopyFilesBuildPhase', [buildFile('embed', extProduct, {ATTRIBUTES: ['RemoveHeadersOnCopy']})], {dstPath: '', dstSubfolderSpec: 13, name: 'Embed App Extensions'});
 const settings = {SDKROOT: 'iphoneos', IPHONEOS_DEPLOYMENT_TARGET: '17.0', SWIFT_VERSION: '5.0', TARGETED_DEVICE_FAMILY: '1,2',
-  CODE_SIGN_STYLE: 'Automatic', CURRENT_PROJECT_VERSION: '2', MARKETING_VERSION: '0.5.1', ENABLE_USER_SCRIPT_SANDBOXING: 'YES'};
+  CODE_SIGN_STYLE: 'Automatic', CURRENT_PROJECT_VERSION: '2', MARKETING_VERSION: '0.5.1', ENABLE_USER_SCRIPT_SANDBOXING: 'YES', ALWAYS_SEARCH_USER_PATHS: 'NO'};
 function configs(name, extra) {
   return object(`${name}-configs`, {isa: 'XCConfigurationList', defaultConfigurationIsVisible: 0, defaultConfigurationName: 'Debug',
     buildConfigurations: ['Debug', 'Release'].map(mode => object(`${name}-${mode}`, {isa: 'XCBuildConfiguration', name: mode,
@@ -62,7 +62,7 @@ function configs(name, extra) {
 const projectConfigs = configs('project', {});
 const appConfigs = configs('app', {PRODUCT_NAME: 'RemoteFIDO', PRODUCT_BUNDLE_IDENTIFIER: 'de.lytiq.RemoteFIDO', GENERATE_INFOPLIST_FILE: 'YES',
   INFOPLIST_KEY_UIApplicationSceneManifest_Generation: 'YES', INFOPLIST_KEY_UILaunchScreen_Generation: 'YES', INFOPLIST_KEY_CFBundleDisplayName: 'Remote FIDO',
-  INFOPLIST_KEY_UISupportedInterfaceOrientations: 'UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight'});
+  INFOPLIST_KEY_UISupportedInterfaceOrientations: 'UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight'});
 const extConfigs = configs('extension', {PRODUCT_NAME: 'RemoteFIDOExtension', PRODUCT_BUNDLE_IDENTIFIER: 'de.lytiq.RemoteFIDO.Extension',
   APPLICATION_EXTENSION_API_ONLY: 'YES', SKIP_INSTALL: 'YES', INFOPLIST_FILE: 'Extension-Info.plist', OTHER_LDFLAGS: ['-framework', 'SafariServices']});
 const extTarget = object('extension-target', {isa: 'PBXNativeTarget', name: 'RemoteFIDOExtension', productName: 'RemoteFIDOExtension',
@@ -77,7 +77,11 @@ const group = object('main-group', {isa: 'PBXGroup', children: [appSwift, extSwi
 const project = object('project', {isa: 'PBXProject', attributes: {LastUpgradeCheck: '2600'}, buildConfigurationList: projectConfigs, compatibilityVersion: 'Xcode 14.0',
   developmentRegion: 'en', hasScannedForEncodings: 0, knownRegions: ['en', 'Base'], mainGroup: group, productRefGroup: products,
   projectDirPath: '', projectRoot: '', targets: [appTarget, extTarget]});
-fs.writeFileSync(path.join(out, 'RemoteFIDO.xcodeproj/project.pbxproj'), plist({archiveVersion: 1, classes: {}, objectVersion: 56, objects, rootObject: project}));
+// PBX's legacy decoder expects numeric metadata as NSString, even in XML
+// plists. A syntactically valid integer plist can otherwise crash Xcode.
+const projectArchive = JSON.parse(JSON.stringify({archiveVersion: 1, classes: {}, objectVersion: 56, objects, rootObject: project},
+  (_key, value) => typeof value === 'number' ? String(value) : value));
+fs.writeFileSync(path.join(out, 'RemoteFIDO.xcodeproj/project.pbxproj'), plist(projectArchive));
 console.log(`Generated ${out}/RemoteFIDO.xcodeproj. Signing and hardware acceptance remain separate.`);
 if (process.argv.includes('--build')) for (const sdk of ['iphonesimulator', 'iphoneos']) {
   execFileSync('xcodebuild', ['-project', path.join(out, 'RemoteFIDO.xcodeproj'), '-scheme', 'RemoteFIDO', '-configuration', 'Debug',
