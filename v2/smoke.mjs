@@ -9,10 +9,11 @@ import {fileURLToPath} from 'node:url';
 import {FrameDecoder, encodeFrame} from '../protocol.mjs';
 import {call} from './http.mjs';
 
-const [role, configPath, nonce] = process.argv.slice(2);
+const [role, configPath, nonce, provider = 'google'] = process.argv.slice(2);
 assert.match(nonce ?? '', /^[0-9a-f-]{36}$/);
-const raw = JSON.stringify({rpId: 'google.com', challenge: crypto.createHash('sha256').update(`remote-fido-smoke:${nonce}`).digest('base64url'),
-  timeout: 60000, userVerification: 'required', extensions: {remoteDesktopClientOverride: {origin: 'https://accounts.google.com', sameOriginWithAncestors: true}}});
+assert.ok(['google', 'apple'].includes(provider));
+const raw = JSON.stringify({rpId: `${provider}.com`, challenge: crypto.createHash('sha256').update(`remote-fido-smoke:${nonce}`).digest('base64url'),
+  timeout: 60000, userVerification: 'required', extensions: {remoteDesktopClientOverride: {origin: provider === 'apple' ? 'https://idmsa.apple.com' : 'https://accounts.google.com', sameOriginWithAncestors: true}}});
 if (role === 'target') {
   const child = spawn(process.execPath, [fileURLToPath(new URL('native-host.mjs', import.meta.url)), configPath], {stdio: ['pipe', 'pipe', 'inherit']});
   const decoder = new FrameDecoder('LE');

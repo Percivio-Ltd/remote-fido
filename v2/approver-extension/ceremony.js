@@ -45,6 +45,8 @@ export async function ceremony(request) {
   try {
     // A click in the real origin supplies explicit intent (also useful on iOS).
     panel = document.createElement('div');
+    panel.dataset.remoteFidoApproval = request.id;
+    panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', 'Approve remote login'); panel.setAttribute('aria-modal', 'true');
     panel.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#101b2c;color:white;display:grid;place-items:center;font:18px system-ui';
     const root = panel.attachShadow({mode: 'closed'});
     const box = document.createElement('section'); box.style.cssText = 'max-width:540px;padding:32px';
@@ -54,6 +56,7 @@ export async function ceremony(request) {
     button.style.cssText = 'font:inherit;padding:14px;border-radius:10px;cursor:pointer';
     const cancel = document.createElement('button'); cancel.textContent = 'Cancel'; cancel.style.cssText = button.style.cssText;
     box.append(title, text, button, cancel); root.append(box); document.documentElement.append(panel);
+    button.focus();
     const credential = await new Promise((resolve, reject) => {
       controller.signal.addEventListener('abort', () => reject(new DOMException('Cancelled', 'AbortError')), {once: true});
       cancel.onclick = () => controller.abort();

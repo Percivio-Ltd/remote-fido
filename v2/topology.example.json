@@ -3,7 +3,8 @@
   "coordinatorPort": 19472,
   "extensionOrigins": ["chrome-extension://hccloojihlmnnpmdkknnloknfbbbelba"],
   "rpOrigins": {
-    "https://accounts.google.com": {"page": "https://accounts.google.com/robots.txt", "rpIds": ["google.com", "accounts.google.com"]}
+    "https://accounts.google.com": {"page": "https://accounts.google.com/robots.txt", "rpIds": ["google.com", "accounts.google.com"]},
+    "https://idmsa.apple.com": {"page": "https://idmsa.apple.com/appleauth/auth/authorize", "rpIds": ["apple.com"]}
   },
   "devices": {
     "tintagel": {"name": "Tintagel", "roles": ["target"], "endpoint": "https://tintagel.tailbb0f71.ts.net:9473", "port": 19473},

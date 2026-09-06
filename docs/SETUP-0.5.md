@@ -78,14 +78,62 @@ coordinator is down. Targets check assertion structure and request binding;
 the real relying party checks the cryptographic signature with its registered
 public key. Target/browser restarts invalidate outstanding requests.
 
-Initial allowlist: exact `https://accounts.google.com`, RP `google.com` or
-`accounts.google.com`. The approver reconstructs options from the exact hashed
+Allowlist: exact `https://accounts.google.com`, RP `google.com` or
+`accounts.google.com`; and exact `https://idmsa.apple.com`, RP `apple.com`.
+The approver reconstructs options from the exact hashed
 request and uses a real same-origin HTTPS page in an isolated content world.
 No CDP, Chrome policy spoofing, forged origin, TLS interception, Apple browser
 entitlement, or associated-domain impersonation is used in production.
 Registration, cross-origin frames, extra WebAuthn extensions, and unconfigured
 origins are rejected. Original credential IDs, transports and UV preference
 are preserved. The browser decides which local passkey providers are offered.
+
+## Apple Account forwarding (approver extension 0.5.2)
+
+Apple's top-level `idmsa.apple.com` login can now use the existing Tintagel
+target → Nimue approver route. This does not support every Apple subdomain or
+cross-origin embedded sign-in flow. Apple approval opens the exact same-origin
+`https://idmsa.apple.com/appleauth/auth/authorize` page. The ordinary
+`robots.txt` endpoint redirects away and is deliberately not used. The extension
+adds a foreground approval dialog and focuses its explicit passkey button.
+This passes the original target challenge to the local browser; it does not
+submit a separate local Apple login or forward password-autofill approvals.
+
+For an existing deployment, preserve all credentials. The scoped updater adds
+only the supported Apple policy and refuses a conflicting existing entry:
+
+```sh
+node v2/update-apple-policy.mjs /absolute/tintagel-target.json
+# Check the coordinator has no pending login before applying/restarting.
+node v2/update-apple-policy.mjs /absolute/tintagel-target.json --execute
+```
+
+It creates a mode-0600 original-config backup, verifies the replacement and
+does not restart any service itself. Reload only the v2 target service. Keep
+the retained deployment copy in sync for future device enrollment. Update
+Nimue's `request.js`, `ceremony.js` and `manifest.json`, preserving the extension
+ID and stored config. Reload **Remote FIDO — Approve here** in Chrome, accept
+its added `idmsa.apple.com` permission, and refresh the dashboard. The target
+Chrome extension itself needs no code or permission change; if it shows OFF
+or ERR after a service restart, explicitly enable it again.
+
+Then choose **Sign in with Passkey** on Tintagel's Apple login page and approve
+the request on Nimue. A Chrome password-autofill Touch ID prompt is a different
+operation and is not forwarded by this WebAuthn path. Any Apple Developer
+Program agreement remains a separate account-holder decision.
+
+Checks on 2026-09-06: 45 Node tests pass. An isolated Chrome-for-Testing profile
+loaded the real Apple approval page and used a **virtual authenticator** to
+verify exact `idmsa.apple.com` origin, `apple.com` RP, challenge, UP/UV and a
+cryptographically valid synthetic signature. Local-browser regression tests
+also pass. Live Tintagel↔Nimue synthetic cancellation checks exercise both
+Apple and Google routing without using a real passkey or changing selection.
+These checks do not establish successful Apple Account login with a real key.
+
+```sh
+CHROME_TEST_BIN=/absolute/chrome-for-testing REMOTE_FIDO_TEST_LIVE_APPLE=1 \
+  node tests/browser/approver.test.mjs
+```
 
 ## Provisioning other nodes
 
