@@ -3,9 +3,12 @@
 ## Selected Apple-passkey approvers (0.5 prototype)
 
 The new, separately installed `v2/` path supports explicit approver selection
-on Tidepool, target requests on Tintagel, and local Apple-passkey approval on
+on Tidepool, target requests on Tintagel and agent-02, and local Apple-passkey approval on
 Nimue. It forwards WebAuthn requests and assertions—not fingerprints. See the
 [architecture](docs/ARCHITECTURE-0.5.md) and [setup / acceptance guide](docs/SETUP-0.5.md).
+The standard policy includes Google, Apple and OpenAI sign-in origins. Real
+Apple login remains incompatible with its extra WebAuthn extensions; OpenAI
+forwarding is transport-tested but real login acceptance remains pending.
 The [iPhone/iPad approver](docs/IOS-APPROVER.md) has a separate mobile Safari
 execution path; signing and hardware acceptance are still pending.
 The existing 0.4 YubiKey implementation below remains unchanged and usable.

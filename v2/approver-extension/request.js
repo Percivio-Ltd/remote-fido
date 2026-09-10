@@ -3,7 +3,8 @@
 // permission in the manifest as well as this policy.
 export const rpOrigins = {
   'https://accounts.google.com': {page: 'https://accounts.google.com/robots.txt', rpIds: ['google.com', 'accounts.google.com']},
-  'https://idmsa.apple.com': {page: 'https://idmsa.apple.com/appleauth/auth/authorize', rpIds: ['apple.com']}
+  'https://idmsa.apple.com': {page: 'https://idmsa.apple.com/appleauth/auth/authorize', rpIds: ['apple.com']},
+  'https://auth.openai.com': {page: 'https://auth.openai.com/log-in', rpIds: ['openai.com']}
 };
 export async function bindRequest(request, summary, policy = rpOrigins) {
   const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(request.raw)))].map(x => x.toString(16).padStart(2, '0')).join('');

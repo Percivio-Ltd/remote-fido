@@ -36,6 +36,11 @@ export async function ceremony(request) {
   const key = '__remoteFidoApprovalV2';
   if (location.origin !== request.origin || location.href !== request.page || window !== top)
     return {error: 'Approval document changed'};
+  // A site's verification/error document can explicitly disable WebAuthn.
+  // Do not cover that document with our dialog or attempt to bypass its policy.
+  const policy = document.permissionsPolicy ?? document.featurePolicy;
+  if (policy && !policy.allowsFeature('publickey-credentials-get'))
+    return {error: 'This sign-in document blocks passkeys. Complete any site verification in this tab, then start a new remote login request.'};
   if (globalThis[key]) return {error: 'Another local ceremony is active'};
   const controller = new AbortController();
   globalThis[key] = {id: request.id, controller};

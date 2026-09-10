@@ -10,22 +10,27 @@ import {validateAssertion} from '../../v2/core.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const liveApple = process.env.REMOTE_FIDO_TEST_LIVE_APPLE === '1';
+const liveOpenAI = process.env.REMOTE_FIDO_TEST_LIVE_OPENAI === '1';
+assert.ok(!(liveApple && liveOpenAI), 'Select only one live RP test');
 await fs.mkdir(path.join(root, '.scratch'), {recursive: true});
 const temporary = await fs.mkdtemp(path.join(root, '.scratch', 'approver-browser-'));
 const fixture = path.join(temporary, 'extension'); await fs.mkdir(fixture);
 await fs.copyFile(path.join(root, 'v2/approver-extension/ceremony.js'), path.join(fixture, 'ceremony.js'));
 await fs.writeFile(path.join(fixture, 'manifest.json'), JSON.stringify({manifest_version: 3, name: 'Isolated Remote FIDO test', version: '1.0',
-  permissions: ['scripting', 'tabs'], host_permissions: [liveApple ? 'https://idmsa.apple.com/*' : 'http://localhost/*'], background: {service_worker: 'worker.js', type: 'module'}}));
+  permissions: ['scripting', 'tabs'], host_permissions: [liveApple ? 'https://idmsa.apple.com/*' : liveOpenAI ? 'https://auth.openai.com/*' : 'http://localhost/*'], background: {service_worker: 'worker.js', type: 'module'}}));
 await fs.writeFile(path.join(fixture, 'worker.js'), `import {ceremony,cancelCeremony} from './ceremony.js';
 globalThis.run = (target, request) => chrome.scripting.executeScript({target, world:'ISOLATED',func:ceremony,args:[request]});
 globalThis.cancel = (target, id) => chrome.scripting.executeScript({target,world:'ISOLATED',func:cancelCeremony,args:[id]});
 globalThis.mobileResults=[];
 chrome.runtime.onMessage.addListener((m,sender,reply)=>{if(m.type==='mobile-pulse')reply({state:'started'});if(m.type==='mobile-finish'){globalThis.mobileResults.push({m,sender});reply({ok:true});}});`);
-const server = http.createServer((req, res) => res.end('<title>Local test RP</title>'));
+const server = http.createServer((req, res) => {
+  if (req.url === '/blocked') res.setHeader('Permissions-Policy', 'publickey-credentials-get=()');
+  res.end('<title>Local test RP</title>');
+});
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-const origin = liveApple ? 'https://idmsa.apple.com' : `http://localhost:${server.address().port}`;
-const rpId = liveApple ? 'apple.com' : 'localhost';
-const approvalPage = liveApple ? `${origin}/appleauth/auth/authorize` : `${origin}/`;
+const origin = liveApple ? 'https://idmsa.apple.com' : liveOpenAI ? 'https://auth.openai.com' : `http://localhost:${server.address().port}`;
+const rpId = liveApple ? 'apple.com' : liveOpenAI ? 'openai.com' : 'localhost';
+const approvalPage = liveApple ? `${origin}/appleauth/auth/authorize` : liveOpenAI ? `${origin}/log-in` : `${origin}/`;
 let context;
 try {
   context = await chromium.launchPersistentContext(path.join(temporary, 'profile'), {headless: true, channel: 'chromium',
@@ -34,6 +39,8 @@ try {
   const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
   const page = await context.newPage(); await page.goto(approvalPage);
   assert.equal(page.url(), approvalPage, 'The real approval document must not redirect');
+  assert.ok(await page.evaluate(() => (document.permissionsPolicy ?? document.featurePolicy)?.allowsFeature('publickey-credentials-get') !== false),
+    'The genuine RP document blocks passkeys (possibly site verification). No header override, origin spoofing or challenge bypass is permitted.');
   const cdp = await context.newCDPSession(page); await cdp.send('WebAuthn.enable');
   const {authenticatorId} = await cdp.send('WebAuthn.addVirtualAuthenticator', {options: {protocol: 'ctap2', transport: 'internal',
     hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true}});
@@ -64,7 +71,7 @@ try {
   assert.match((await cancelled)[0].result.error, /AbortError/);
   const wrong = await worker.evaluate(({target, request}) => globalThis.run(target, request), {target, request: {...request, origin: 'https://evil.example'}});
   assert.match(wrong[0].result.error, /document changed/);
-  await page.goto(liveApple ? `${approvalPage}?remote-fido-synthetic-test=1` : `${origin}/new`);
+  await page.goto(liveApple || liveOpenAI ? `${approvalPage}?remote-fido-synthetic-test=1` : `${origin}/new`);
   await assert.rejects(worker.evaluate(({target, request}) => globalThis.run(target, request), {target, request}));
   console.log('PASS: cancellation aborts ceremony; mismatched origin and stale document ID cannot sign.');
   await page.goto(approvalPage);
@@ -89,6 +96,15 @@ try {
     Buffer.from(mobileResult.response.signature, 'base64url')));
   console.log('PASS: mobile event delivery completes from RP tab without dashboard; exact sender identity and signature verified (Chrome virtual authenticator, not Safari hardware).');
   if (liveApple) console.log('PASS: genuine idmsa.apple.com document and apple.com RP with synthetic credentials only; no Apple account login attempted.');
+  if (liveOpenAI) console.log('PASS: genuine auth.openai.com document and openai.com RP with synthetic credentials only; no OpenAI account login attempted.');
+  if (!liveApple && !liveOpenAI) {
+    await page.goto(`${origin}/blocked`);
+    const blocked = await worker.evaluate(({tabId, request}) => globalThis.run({tabId}, request),
+      {tabId, request: {...request, id: crypto.randomUUID(), page: `${origin}/blocked`}});
+    assert.match(blocked[0].result.error, /sign-in document blocks passkeys/);
+    assert.equal(await page.locator('[data-remote-fido-approval]').count(), 0, 'Do not obscure the site verification document');
+    console.log('PASS: denied site Permissions Policy is respected and reported without mounting an approval dialog.');
+  }
 } finally {
   await context?.close(); await new Promise(resolve => server.close(resolve)); await fs.rm(temporary, {recursive: true, force: true});
 }

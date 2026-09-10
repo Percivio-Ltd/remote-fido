@@ -1,5 +1,48 @@
 # Selected approvers: setup and acceptance
 
+## OpenAI policy — approver extension 0.5.3, 2026-09-10
+
+OpenAI's sign-in origin `https://auth.openai.com`, RP `openai.com`, is now
+included in the standard approver policy and example topology. The scoped
+policy update is deployed to both Tintagel and agent-02 and retained in their
+private deployment configs. Credentials, existing Google/Apple policies and
+Nimue's selected-device setting are unchanged. The approval carrier is the
+normal same-origin `https://auth.openai.com/log-in` page, not `chatgpt.com`.
+The origin/RP pair also matches the existing 0.4 OpenAI request fixture.
+Unknown origins, cross-origin requests and unsupported WebAuthn extensions
+remain rejected; this is not a wildcard permission for all OpenAI subdomains.
+
+On **Nimue**, reload **Remote FIDO — Approve here**, accept its new exact
+`auth.openai.com` site permission, and reopen its dashboard. No device-config
+re-import is needed for this policy change if the agent-02 configuration was
+already imported. On each target profile, ensure the target extension is
+**ON** after the service restart. Then start a fresh ChatGPT passkey login.
+
+Validation: all 49 Node tests and the local isolated-browser tests pass.
+Live **cancellation-only** checks pass for both targets through Nimue, using
+the OpenAI origin/RP; they do not use a real passkey. The genuine OpenAI browser
+test was **blocked**, not passed: a fresh isolated browser received a site
+verification document whose Permissions Policy disables WebAuthn. The approver
+now reports that condition without covering the page with its dialog. Complete
+any site verification normally in that tab, then start a new remote request.
+No header override, origin spoofing or verification bypass is implemented.
+Successful real ChatGPT login remains an acceptance step, not a demonstrated
+result of these synthetic tests.
+
+For another existing target, preview the additive update and apply only when
+no login is pending:
+
+```sh
+node v2/update-openai-policy.mjs /absolute/target-config.json
+node v2/update-openai-policy.mjs /absolute/target-config.json --execute
+```
+
+The updater retains a private recoverable backup and refuses conflicting
+entries. Restart only that target service and synchronize its retained config.
+Update approver `request.js`, `ceremony.js` and `manifest.json`, then reload the
+extension. New provisioning using the standard example already includes this
+policy. Custom topologies remain explicit and are not silently expanded.
+
 ## agent-02 enrollment — 2026-09-10
 
 The agent-02 target service and separate v2 native host are installed under
@@ -113,7 +156,8 @@ the real relying party checks the cryptographic signature with its registered
 public key. Target/browser restarts invalidate outstanding requests.
 
 Allowlist: exact `https://accounts.google.com`, RP `google.com` or
-`accounts.google.com`; and exact `https://idmsa.apple.com`, RP `apple.com`.
+`accounts.google.com`; exact `https://idmsa.apple.com`, RP `apple.com`; and
+exact `https://auth.openai.com`, RP `openai.com`.
 The approver reconstructs options from the exact hashed
 request and uses a real same-origin HTTPS page in an isolated content world.
 No CDP, Chrome policy spoofing, forged origin, TLS interception, Apple browser
@@ -240,6 +284,8 @@ separate.
 npm ci --ignore-scripts --cache /Volumes/BigStore/remote-fido-npm-cache
 npm test
 CHROME_TEST_BIN=/absolute/path/to/isolated/chrome-for-testing npm run test:browser
+# Optional genuine OpenAI origin test; site verification may block it.
+REMOTE_FIDO_TEST_LIVE_OPENAI=1 npm run test:browser
 ```
 
 Browser tests launch only their own temporary profile and local HTTP test RP
@@ -247,7 +293,7 @@ Browser tests launch only their own temporary profile and local HTTP test RP
 browser, install a managed tool update, or use real passkeys. Temporary profiles
 are created under the repository's ignored `.scratch/` on BigStore.
 
-`v2/smoke.mjs target|approver private-config.json shared-uuid` is an explicit
+`v2/smoke.mjs target|approver private-config.json shared-uuid [google|apple|openai]` is an explicit
 live **cancellation-only** test. Run target first on the target device, then
 approver on the source device within 60 seconds, using the same fresh UUID.
 It tests the real HTTPS/native transport without opening a browser or changing

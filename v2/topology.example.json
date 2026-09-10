@@ -4,7 +4,8 @@
   "extensionOrigins": ["chrome-extension://hccloojihlmnnpmdkknnloknfbbbelba"],
   "rpOrigins": {
     "https://accounts.google.com": {"page": "https://accounts.google.com/robots.txt", "rpIds": ["google.com", "accounts.google.com"]},
-    "https://idmsa.apple.com": {"page": "https://idmsa.apple.com/appleauth/auth/authorize", "rpIds": ["apple.com"]}
+    "https://idmsa.apple.com": {"page": "https://idmsa.apple.com/appleauth/auth/authorize", "rpIds": ["apple.com"]},
+    "https://auth.openai.com": {"page": "https://auth.openai.com/log-in", "rpIds": ["openai.com"]}
   },
   "devices": {
     "tintagel": {"name": "Tintagel", "roles": ["target"], "endpoint": "https://tintagel.tailbb0f71.ts.net:9473", "port": 19473},

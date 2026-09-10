@@ -41,7 +41,7 @@ test('Apple request binds exact origin, RP, raw challenge, page and returned ass
   }
   assert.throws(() => parseRequest(raw({extensions: {remoteDesktopClientOverride: {origin, sameOriginWithAncestors: false}}}), rpOrigins), /same-origin/);
 });
-test('Apple and Google policies match manifest permissions and new target topology', () => {
+test('All supported RP policies match manifest permissions and new target topology', () => {
   const manifest = JSON.parse(fs.readFileSync(new URL('./approver-extension/manifest.json', import.meta.url)));
   const topology = JSON.parse(fs.readFileSync(new URL('./topology.example.json', import.meta.url)));
   assert.deepEqual(topology.rpOrigins, rpOrigins);
