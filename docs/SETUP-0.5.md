@@ -1,5 +1,39 @@
 # Selected approvers: setup and acceptance
 
+## agent-02 enrollment — 2026-09-10
+
+The agent-02 target service and separate v2 native host are installed under
+`/Users/admin/Library/Application Support/RemoteFIDO-v2`. Tailscale Serve exposes
+only tailnet HTTPS port 9473 to loopback 19473. Nimue is authorized for both
+Tintagel and agent-02; existing Tintagel credentials and the coordinator signing
+key are unchanged. Nimue remains selected at revision 1. A live cancellation-only
+test passed from the agent-02 native bridge through the coordinator and Nimue's
+direct HTTPS connection, including duplicate-start rejection and native request
+ID delivery. There were zero pending requests afterward. All 47 Node tests pass.
+This does not prove Chrome activation or a successful real passkey login.
+
+Browser activation remains manual:
+
+1. On **agent-02**, repeat in **Percivio**, **Operator**, and **LYTiQ** Chrome
+   profiles: open `chrome://extensions`, enable Developer mode, and Load unpacked
+   `/Users/admin/Library/Application Support/RemoteFIDO-v2/code/v2/target-extension`.
+   Expected extension ID: `dollgdpmepjkbpialkfeafneeppmcijn`. Disable the old
+   Remote FIDO proxy in that profile if enabled, then click the new target
+   extension to turn it **ON**. Existing old services/configuration were preserved.
+2. On **Nimue**, reload **Remote FIDO — Approve here** in its already-configured
+   Chrome profile and accept the added exact `agent-02.tailbb0f71.ts.net` site
+   permission. Reopen the dashboard and import the updated
+   `/Users/artuskg/Library/Application Support/RemoteFIDO-v2/nimue-approver.json`.
+   The file is private; do not paste or publish its contents. Updating the file
+   on disk does **not** update the extension's stored configuration automatically.
+3. Start a Google passkey login on agent-02 and approve it on Nimue. Completion
+   on the actual Google page is the remaining real-login acceptance test.
+
+Known limitation: actual Apple login requests use `largeBlob`/`prf` extensions
+that this prototype rejects. The earlier synthetic Apple check below did not
+exercise those extensions and does not establish real Apple login support.
+This enrollment does not fix that incompatibility.
+
 ## Current status — 2026-09-05
 
 This is an opt-in **0.5.0 prototype**, separate from the existing 0.4 release,
@@ -90,9 +124,10 @@ are preserved. The browser decides which local passkey providers are offered.
 
 ## Apple Account forwarding (approver extension 0.5.2)
 
-Apple's top-level `idmsa.apple.com` login can now use the existing Tintagel
-target → Nimue approver route. This does not support every Apple subdomain or
-cross-origin embedded sign-in flow. Apple approval opens the exact same-origin
+The prototype includes an `idmsa.apple.com` forwarding policy, but actual
+Apple login remains incomplete because its `largeBlob`/`prf` extensions are
+rejected (see the current limitation above). It also does not support every
+Apple subdomain or cross-origin embedded sign-in flow. Apple approval opens the exact same-origin
 `https://idmsa.apple.com/appleauth/auth/authorize` page. The ordinary
 `robots.txt` endpoint redirects away and is deliberately not used. The extension
 adds a foreground approval dialog and focuses its explicit passkey button.
@@ -170,6 +205,25 @@ Adding a node to an existing deployment requires deliberate credential and
 config enrollment on the coordinator and affected targets, followed by a
 service reload when no login is pending. It is not automatic discovery. Daily
 switching among enrolled approvers needs only **Approve here**, not reprovisioning.
+
+To add a target for an existing approver while retaining all current identities:
+
+```sh
+node v2/prepare-target-enrollment.mjs /absolute/private-deployment \
+  tintagel nimue agent-02 agent-02 https://agent-02.tailbb0f71.ts.net:9473 \
+  19473 /absolute/new-private-drafts
+# Add --execute only after checking the preview.
+```
+
+The helper refuses duplicate identities/endpoints and mismatched reference keys
+or credentials. It writes mode-0600 drafts and source hashes without reloading
+services or changing selection. Verify those source hashes before applying,
+back up affected configs, and wait until no login is pending. Copy only the
+new target/bridge credentials to the target; reload the coordinator after its
+config update. Update the affected approver's exact host permissions, reload
+that extension and import its updated config. Keep the retained deployment
+copies synchronized for subsequent enrollment; do not use the new-deployment
+provisioner to add a device to a live setup.
 
 On Tidepool, private runtime/config/state and installed code are under
 `/Volumes/BigStore/remote-fido-v2-deployment`. The LaunchAgent is
