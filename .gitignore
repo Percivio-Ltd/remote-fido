@@ -1,0 +1,20 @@
+mac-client/.build/
+mac-client/.build-ios/
+node_modules/
+.scratch/
+apple-app/.build/
+build/Remote FIDO.app/
+build/ios/
+coordinator.json
+coordinator-state.json
+*-approver.json
+*-target.json
+*-bridge.json
+/build/remote-fido-assert
+/SHA256SUMS
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.mobileprovision

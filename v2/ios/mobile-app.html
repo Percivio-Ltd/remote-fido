@@ -1,0 +1,11 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Remote FIDO · Approver</title><link rel="stylesheet" href="mobile.css">
+<main><p class="eyebrow">REMOTE FIDO · IPHONE / IPAD</p><h1>Approve here</h1><p>Use a passkey on this device for a login on your computer.</p>
+<section><h2>1 · Connect this device</h2><p id="device">Import this device’s configuration to begin.</p>
+<label class="file">Choose configuration file…<input id="config" type="file" accept=".json,application/json"></label>
+<p class="hint">Use Files to open the private JSON provided for this iPhone or iPad. Each device needs its own identity. Don’t share this file.</p>
+<details><summary>Browser permission setup</summary><p>Register this exact Safari extension origin on the coordinator and targets:</p><code id="origin"></code><button id="copy">Copy extension origin</button><p class="hint">Allow this extension on Google and its two tailnet service sites. Keep Tailscale connected.</p></details></section>
+<section><h2>2 · Choose where to approve</h2><p id="selection">Not connected</p><button id="select" disabled>Approve here by default</button><button id="any" disabled>Let any device claim</button></section>
+<section><h2>3 · Pending logins</h2><div id="requests">No requests loaded.</div><button id="cancel" hidden>Cancel this device’s active approval</button><button id="refresh">Refresh</button></section>
+<p id="message" role="status" aria-live="polite"></p><p class="hint">Keep the Google approval tab in the foreground for Face ID or Touch ID. You do not need to keep this dashboard tab active. No background push notifications.</p></main>
+<script type="module" src="mobile-app.js"></script></html>

@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Remote FIDO — selected approver target",
+  "version": "0.5.0",
+  "minimum_chrome_version": "115",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAo/vcPlaOt08FZxur9fg6A4HMfxb1RkZ3ogEfJID17X8laIrhzrMdfojRI68TWDq9MQVUybX451+YhVeoy5C2UZ7R+uBUyqphyoC3oJ1sIlDDl6EtYCPirUcu3QiD+pMUyI6iPPU6l+iBICetekCRJsM5/8LFDAxgVJytGPAUSIQPAM0LiJ2nHWF2uBHe6sm76z/3OYXt033v5mlo129D5P1C0hcOh/A0QePj5pd+MiIiGfr+zl8TzcjhYA2Da+i213FbR2NwuIr/mvSHAK5g91N/Ljt4O0JC6ClLkkXL6ZcRQ3T/eUsRl7gZjmIkRm+ZfUgyzzyb+tGV27Xqz4BFMwIDAQAB",
+  "permissions": ["nativeMessaging", "webAuthenticationProxy", "storage"],
+  "background": {"service_worker": "worker.js"},
+  "action": {"default_title": "Click to enable / disable remote Apple passkeys"}
+}

@@ -1,0 +1,93 @@
+// This function is serialized into an ISOLATED content world. Do not capture
+// extension secrets or send them to this page. Never execute it in MAIN.
+export async function ceremony(request) {
+  // On iOS the dashboard tab can be suspended after the RP tab opens. Mount
+  // synchronously, then deliver from the foreground content world via internal
+  // extension messages. No bearer credential or assignment ticket enters it.
+  if (request.mobileNonce) {
+    let pulsing = false;
+    const pulse = setInterval(async () => {
+      if (pulsing) return; pulsing = true;
+      try {
+        const reply = await chrome.runtime.sendMessage({type: 'mobile-pulse', id: request.id, nonce: request.mobileNonce});
+        if (reply?.state !== 'started') globalThis.__remoteFidoApprovalV2?.controller.abort();
+      } catch { globalThis.__remoteFidoApprovalV2?.controller.abort(); }
+      finally { pulsing = false; }
+    }, 1500);
+    const local = {...request}; delete local.mobileNonce;
+    // The function name is preserved when serialized by scripting.executeScript.
+    ceremony(local).then(async outcome => {
+      clearInterval(pulse);
+      let detail;
+      try {
+        const reply = await chrome.runtime.sendMessage({type: 'mobile-finish', id: request.id, nonce: request.mobileNonce, outcome});
+        if (!reply?.ok) throw new Error(reply?.error ?? 'Delivery not confirmed');
+        detail = outcome.error ? 'Approval cancelled. You can return to the Remote FIDO dashboard.' :
+          'Assertion delivered. Check the login on the target computer. You can return to the Remote FIDO dashboard.';
+      } catch { detail = 'Delivery was not confirmed. Return to the Remote FIDO dashboard. Do not repeat this approval; start a new login if necessary.'; }
+      if (location.href === request.page) {
+        const status = document.createElement('div'); status.textContent = detail;
+        status.style.cssText = 'position:fixed;inset:0;z-index:2147483647;padding:40px;background:#101b2c;color:white;font:20px system-ui';
+        document.documentElement.append(status);
+      }
+    });
+    return {mounted: true};
+  }
+  const key = '__remoteFidoApprovalV2';
+  if (location.origin !== request.origin || location.href !== request.page || window !== top)
+    return {error: 'Approval document changed'};
+  // A site's verification/error document can explicitly disable WebAuthn.
+  // Do not cover that document with our dialog or attempt to bypass its policy.
+  const policy = document.permissionsPolicy ?? document.featurePolicy;
+  if (policy && !policy.allowsFeature('publickey-credentials-get'))
+    return {error: 'This sign-in document blocks passkeys. Complete any site verification in this tab, then start a new remote login request.'};
+  if (globalThis[key]) return {error: 'Another local ceremony is active'};
+  const controller = new AbortController();
+  globalThis[key] = {id: request.id, controller};
+  const timeout = setTimeout(() => controller.abort(), Math.max(0, request.expires - Date.now()));
+  const unload = () => controller.abort(); addEventListener('pagehide', unload, {once: true});
+  let panel;
+  try {
+    // A click in the real origin supplies explicit intent (also useful on iOS).
+    panel = document.createElement('div');
+    panel.dataset.remoteFidoApproval = request.id;
+    panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', 'Approve remote login'); panel.setAttribute('aria-modal', 'true');
+    panel.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#101b2c;color:white;display:grid;place-items:center;font:18px system-ui';
+    const root = panel.attachShadow({mode: 'closed'});
+    const box = document.createElement('section'); box.style.cssText = 'max-width:540px;padding:32px';
+    const title = document.createElement('h1'); title.textContent = 'Approve remote login';
+    const text = document.createElement('p'); text.textContent = `${request.targetName} is requesting a passkey for ${request.origin}. No fingerprint or private key leaves this device.`;
+    const button = document.createElement('button'); button.textContent = 'Use a passkey on this device';
+    button.style.cssText = 'font:inherit;padding:14px;border-radius:10px;cursor:pointer';
+    const cancel = document.createElement('button'); cancel.textContent = 'Cancel'; cancel.style.cssText = button.style.cssText;
+    box.append(title, text, button, cancel); root.append(box); document.documentElement.append(panel);
+    button.focus();
+    const credential = await new Promise((resolve, reject) => {
+      controller.signal.addEventListener('abort', () => reject(new DOMException('Cancelled', 'AbortError')), {once: true});
+      cancel.onclick = () => controller.abort();
+      button.onclick = () => {
+        button.disabled = true;
+        if (location.origin !== request.origin || location.href !== request.page) { controller.abort(); return; }
+        const decode = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+        const p = request.options;
+        const publicKey = {...p, challenge: decode(p.challenge), timeout: Math.max(1, request.expires - Date.now()),
+          allowCredentials: p.allowCredentials.map(c => ({...c, id: decode(c.id)}))};
+        navigator.credentials.get({publicKey, signal: controller.signal}).then(resolve, reject);
+      };
+    });
+    if (location.origin !== request.origin || location.href !== request.page || controller.signal.aborted)
+      throw new Error('Approval document changed or request cancelled');
+    const encode = buffer => btoa(String.fromCharCode(...new Uint8Array(buffer))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const response = credential.response;
+    return {result: {id: credential.id, rawId: encode(credential.rawId), type: credential.type,
+      authenticatorAttachment: credential.authenticatorAttachment,
+      response: {clientDataJSON: encode(response.clientDataJSON), authenticatorData: encode(response.authenticatorData),
+        signature: encode(response.signature), userHandle: response.userHandle ? encode(response.userHandle) : null},
+      clientExtensionResults: credential.getClientExtensionResults()}};
+  } catch (e) { return {error: `${e.name}: ${e.message}`}; }
+  finally { clearTimeout(timeout); removeEventListener('pagehide', unload); panel?.remove(); delete globalThis[key]; }
+}
+export function cancelCeremony(id) {
+  const value = globalThis.__remoteFidoApprovalV2;
+  if (value?.id === id) value.controller.abort();
+}

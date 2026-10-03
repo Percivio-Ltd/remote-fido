@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Remote FIDO — Approve here</title>
+<link rel="stylesheet" href="app.css">
+<main><p class="eyebrow">REMOTE FIDO · APPLE PASSKEY APPROVER · PROTOTYPE</p>
+<h1>Where should you approve?</h1><p>No presence detection. Your selection stays until you change it.</p>
+<section><h2>This device</h2><p id="device">Not configured</p>
+<label>Import this device’s private configuration <input id="config" type="file" accept=".json"></label>
+<p class="muted">Only import a configuration provisioned for this device. It contains a credential; do not share it.</p></section>
+<p id="browser-origin" class="muted"></p>
+<section><h2>Approval routing</h2><p id="selection">Connecting…</p><button id="select">Approve here</button>
+<button id="any">Any device may claim</button><button id="refresh">Refresh</button><p id="devices"></p></section>
+<section><h2>Pending requests</h2><div id="requests"></div></section>
+<p id="message" role="status"></p><p class="muted">Leave this page open while approving. A dedicated page at the original site will ask for a local click, then the browser’s passkey prompt. Registration and cross-origin frames are not supported.</p>
+</main><script type="module" src="app.js"></script></html>
