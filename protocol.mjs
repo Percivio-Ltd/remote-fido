@@ -1,3 +1,4 @@
+import './node-runtime.mjs';
 import net from "node:net";
 
 export const PROTOCOL_VERSION = 1;

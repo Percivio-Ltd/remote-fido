@@ -2,6 +2,8 @@
 
 The 0.5 prototype is opt-in and separate from the 0.4 YubiKey path: it uses different extension IDs, native-host names, configuration, and ports. The root `VERSION` still identifies the legacy 0.4 path. Nothing in this guide claims a live deployment or successful physical-device login.
 
+Every Node process must meet the [patched Node.js requirement](../README.md#nodejs-requirement): 22.23.4+ within 22.x, 24.22.1+ within 24.x, or 26.12.1+ within 26.x. The installer checks its own runtime and records its absolute executable path; startup checks also reject an unsupported binary after installation. Upgrade those recorded paths and restart existing services when changing runtimes.
+
 ## Configure a private deployment copy
 
 `v2/topology.example.json` contains synthetic device names and `example.ts.net` hosts. It is not a ready-to-run deployment. Keep real topology, tokens, keys, account details, and device configurations outside the public checkout.
@@ -26,7 +28,7 @@ node v2/provision.mjs /absolute/private/topology.json /absolute/private/new-depl
 
 Provisioning refuses an existing output directory. It creates distinct per-device coordinator credentials, per-target approver credentials, bridge secrets, and an Ed25519 assignment key. Copy only each device's own files to its restricted install directory. The coordinator private key never goes to an approver or target; targets receive only the public key.
 
-On the service-owning Mac, preview installation with `node v2/install-service.mjs /absolute/private/device-config.json`, then explicitly add `--execute`. Preserve `v2/` beside `protocol.mjs`. The installer refuses existing service/native manifests or a different installed version instead of implicitly overwriting them. It does not activate Chrome.
+On the service-owning Mac, preview installation with `node v2/install-service.mjs /absolute/private/device-config.json`, then explicitly add `--execute`. Preserve `v2/` beside both `protocol.mjs` and `node-runtime.mjs`. The installer refuses existing service/native manifests or a different installed version instead of implicitly overwriting them. It does not activate Chrome.
 
 Inspect existing Tailscale Serve rules before configuring the new rule. The coordinator normally uses tailnet HTTPS 9472 to loopback 19472; each target uses HTTPS 9473 to loopback 19473. Services require both device bearer credentials and exact registered extension origins. Do not use Funnel or a public reverse proxy. Restrict the tailnet ACL to the intended devices.
 

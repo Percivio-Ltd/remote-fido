@@ -47,13 +47,14 @@ if ! is-at-least 115 "$chrome_version"; then
 fi
 
 node_bin=""
-for candidate in /opt/homebrew/bin/node /usr/local/bin/node "$HOME/.local/bin/node"; do
+for candidate in "$HOME/.local/bin/node" /opt/homebrew/bin/node /usr/local/bin/node; do
   [[ -x "$candidate" ]] && node_bin=$candidate && break
 done
 if [[ -z "$node_bin" ]]; then
-  print -u2 -- "STOP Node.js is required in Homebrew or ~/.local/bin"
+  print -u2 -- "STOP Node.js is required in ~/.local/bin or Homebrew"
   exit 1
 fi
+"$node_bin" "$script_dir/node-runtime.mjs"
 
 if [[ -r "$install_dir/VERSION" ]]; then
   installed_version=$(<"$install_dir/VERSION")
@@ -89,6 +90,7 @@ fi
 /bin/mkdir -p "$install_dir/extension" "$manifest_dir"
 /usr/bin/install -m 0644 "$script_dir/VERSION" "$install_dir/VERSION"
 /usr/bin/install -m 0644 "$script_dir/protocol.mjs" "$install_dir/protocol.mjs"
+/usr/bin/install -m 0644 "$script_dir/node-runtime.mjs" "$install_dir/node-runtime.mjs"
 /usr/bin/install -m 0755 "$script_dir/native-host.mjs" "$install_dir/native-host.mjs"
 /usr/bin/install -m 0755 "$script_dir/native-host-wrapper" "$install_dir/native-host-wrapper"
 /usr/bin/install -m 0755 "$script_dir/probe-native-host.mjs" "$install_dir/probe-native-host.mjs"

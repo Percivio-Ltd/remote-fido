@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Reproducible minimal Xcode wrapper. Uses Apple's installed Safari extension
 // point; no browser entitlements, certificates, or profile spoofing.
+import '../node-runtime.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';

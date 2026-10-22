@@ -20,9 +20,14 @@ if [[ "$allow_client" != 100.<64-127>.<0-255>.<0-255> ||
 fi
 
 node_bin=""
-for candidate in /opt/homebrew/bin/node /usr/local/bin/node "$HOME/.local/bin/node"; do
+for candidate in "$HOME/.local/bin/node" /opt/homebrew/bin/node /usr/local/bin/node; do
   [[ -x "$candidate" ]] && node_bin=$candidate && break
 done
+if [[ -z "$node_bin" ]]; then
+  print -u2 -- "STOP Node.js is required in ~/.local/bin or Homebrew"
+  exit 1
+fi
+"$node_bin" "$runtime_dir/node-runtime.mjs"
 tailscale_bin=""
 for candidate in /opt/homebrew/bin/tailscale /usr/local/bin/tailscale; do
   [[ -x "$candidate" ]] && tailscale_bin=$candidate && break

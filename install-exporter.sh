@@ -46,9 +46,14 @@ if [[ -r "$install_dir/VERSION" ]]; then
 fi
 
 node_bin=""
-for candidate in /opt/homebrew/bin/node /usr/local/bin/node "$HOME/.local/bin/node"; do
+for candidate in "$HOME/.local/bin/node" /opt/homebrew/bin/node /usr/local/bin/node; do
   [[ -x "$candidate" ]] && node_bin=$candidate && break
 done
+if [[ -z "$node_bin" ]]; then
+  print -u2 -- "STOP Node.js is required in ~/.local/bin or Homebrew"
+  exit 1
+fi
+"$node_bin" "$script_dir/node-runtime.mjs"
 tailscale_bin=""
 for candidate in /opt/homebrew/bin/tailscale /usr/local/bin/tailscale; do
   [[ -x "$candidate" ]] && tailscale_bin=$candidate && break
@@ -90,6 +95,7 @@ fi
 /usr/bin/install -m 0644 "$script_dir/VERSION" "$install_dir/VERSION"
 /usr/bin/install -m 0755 "$script_dir/exporter.mjs" "$install_dir/exporter.mjs"
 /usr/bin/install -m 0644 "$script_dir/protocol.mjs" "$install_dir/protocol.mjs"
+/usr/bin/install -m 0644 "$script_dir/node-runtime.mjs" "$install_dir/node-runtime.mjs"
 /usr/bin/install -m 0755 "$assert_bin" "$install_dir/remote-fido-assert"
 /usr/bin/install -m 0755 "$script_dir/run-exporter.command" "$install_dir/run-exporter.command"
 /usr/bin/install -m 0644 "$script_dir/THIRD_PARTY_NOTICES.md" \

@@ -73,7 +73,10 @@ test('signed assignments bind target, approver, digest, expiry and cannot be mod
   for (const change of [{target: 'a'}, {digest: '0'.repeat(64)}, {expires: Date.now() - 1}]) {
     assert.throws(() => f.target.start('a', {ticket: signTicket({...value, ...change}, f.privateKey)}));
   }
-  assert.throws(() => verifyTicket(`${ticket.slice(0, -2)}AA`, f.publicKey));
+  const [payload, encodedSignature] = ticket.split('.');
+  const signature = Buffer.from(encodedSignature, 'base64url');
+  signature[0] ^= 1;
+  assert.throws(() => verifyTicket(`${payload}.${signature.toString('base64url')}`, f.publicKey));
   assert.equal(f.target.start('a', {ticket}).id, id);
 });
 test('assigned operation can complete while coordinator is unavailable; identical delivery retry is safe', async t => {

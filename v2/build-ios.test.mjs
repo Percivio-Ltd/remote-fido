@@ -10,6 +10,7 @@ function fixture() {
   const repo = path.join(temporary, 'allowed', 'checkout');
   fs.mkdirSync(repo, {recursive: true});
   fs.cpSync(new URL('.', import.meta.url), path.join(repo, 'v2'), {recursive: true});
+  fs.copyFileSync(new URL('../node-runtime.mjs', import.meta.url), path.join(repo, 'node-runtime.mjs'));
   const run = root => {
     const env = {...process.env};
     delete env.REMOTE_FIDO_BUILD_ROOT;

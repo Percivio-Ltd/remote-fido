@@ -4,6 +4,14 @@ Remote FIDO forwards selected WebAuthn assertion requests between explicitly enr
 
 The public repository contains source, tests, installers, and generic configuration examples. Deployment accounts, machine names, addresses, signing identities, private configuration, and operational acceptance records belong outside this repository.
 
+## Node.js requirement
+
+Use a patched stable Node.js release: **22.23.4 or later in 22.x**, **24.22.1 or later in 24.x**, or **26.12.1 or later in 26.x**. These minimums include the [October 21, 2026 security fixes](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases), including CVE-2026-111497. Other major versions, prereleases, and alternative runtimes such as Bun are not supported by this project.
+
+The npm engine requirement is enforced by `.npmrc`. Installers and runtime entry points also check the actual executing Node binary, including direct runs that skip npm. The legacy macOS installers and launchers prefer `~/.local/bin/node`, then `/opt/homebrew/bin/node`, then `/usr/local/bin/node`; the selected binary must pass the same check.
+
+For an existing deployment, upgrade the Node binary used by each service and native-host wrapper, then restart the affected services. A new shell default does not update a running process or the absolute executable paths written by the v2 installer. Preserve private configuration and wait for pending authentication requests to finish before restarting.
+
 ## Selected passkey approvers (0.5 prototype)
 
 The separately installed `v2/` path supports explicit approver selection, target-browser requests, and local passkey approval on an enrolled approver. See the [architecture](docs/ARCHITECTURE-0.5.md), [setup and acceptance guide](docs/SETUP-0.5.md), and [iPhone/iPad approver](docs/IOS-APPROVER.md).
