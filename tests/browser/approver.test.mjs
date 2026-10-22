@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright';
 import {validateAssertion} from '../../v2/core.mjs';
+import {requirePatchedChrome} from '../../browser-security.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const liveApple = process.env.REMOTE_FIDO_TEST_LIVE_APPLE === '1';
@@ -37,6 +38,8 @@ try {
     ...(process.env.CHROME_TEST_BIN ? {executablePath: process.env.CHROME_TEST_BIN} : {}),
     args: [`--disable-extensions-except=${fixture}`, `--load-extension=${fixture}`]});
   const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
+  const browserSession = await context.newCDPSession(context.pages()[0]);
+  requirePatchedChrome((await browserSession.send('Browser.getVersion')).product.split('/').at(-1));
   const page = await context.newPage(); await page.goto(approvalPage);
   assert.equal(page.url(), approvalPage, 'The real approval document must not redirect');
   assert.ok(await page.evaluate(() => (document.permissionsPolicy ?? document.featurePolicy)?.allowsFeature('publickey-credentials-get') !== false),

@@ -12,7 +12,11 @@ The npm engine requirement is enforced by `.npmrc`. Installers and runtime entry
 
 For an existing deployment, upgrade the Node binary used by each service and native-host wrapper, then restart the affected services. A new shell default does not update a running process or the absolute executable paths written by the v2 installer. Preserve private configuration and wait for pending authentication requests to finish before restarting.
 
-## Selected passkey approvers (0.5 prototype)
+## Browser security and loop prevention
+
+Desktop extensions 0.6.0 require Chrome 156.0.8078.47 or newer. Local approval automatically suspends the target proxy and leaves forwarding off afterward. Reload both extensions after updating Chrome, accept the approver's new permission, and reopen its page. See [security and activation](docs/SECURITY.md) for the release checks and validation limits.
+
+## Selected passkey approvers (0.6 prototype)
 
 The separately installed `v2/` path supports explicit approver selection, target-browser requests, and local passkey approval on an enrolled approver. See the [architecture](docs/ARCHITECTURE-0.5.md), [setup and acceptance guide](docs/SETUP-0.5.md), and [iPhone/iPad approver](docs/IOS-APPROVER.md).
 

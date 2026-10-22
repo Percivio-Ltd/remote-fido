@@ -1,5 +1,6 @@
 import {ceremony, cancelCeremony} from './ceremony.js';
 import {bindRequest} from './request.js';
+import {acquireForwardingGuard} from './forwarding-guard.js';
 const $ = id => document.getElementById(id);
 let config = (await chrome.storage.local.get('config')).config; let state; let busy = false; let polling = false;
 let activeCancel;
@@ -47,11 +48,15 @@ async function approve(r, oneOff) {
   // cannot race independent local prompts.
   await navigator.locks.request('remote-fido-ceremony', {ifAvailable: true}, async lock => {
     if (!lock) throw new Error('Another approval page is already signing on this device');
-    busy = true; let tab; let timer; let claim; let request; let token;
+    busy = true; let tab; let timer; let claim; let request; let token; let guard;
     try {
+      guard = await acquireForwardingGuard();
+      guard.assertHeld();
       claim = await api(config.coordinator, '/claim', {requestId: r.id, oneOff});
+      guard.assertHeld();
       token = config.targetTokens[claim.endpoint]; if (!token) throw new Error('Target endpoint is not provisioned');
       request = await api(claim.endpoint, '/start', {ticket: claim.ticket}, token);
+      guard.assertHeld();
       request = await bindRequest(request, r);
       if (new URL(request.page).origin !== request.origin || request.origin !== r.origin || request.id !== r.id)
         throw new Error('Target request binding mismatch');
@@ -77,6 +82,8 @@ async function approve(r, oneOff) {
           headers: {Authorization: `Bearer ${token}`, 'Content-Type': 'application/json'},
           body: JSON.stringify({ticket: claim.ticket, execution: request.execution, error: true})}).catch(() => {});
       };
+      guard.lost.then(() => activeCancel?.());
+      guard.assertHeld();
       let checking = false;
       timer = setInterval(async () => {
         if (checking) return; checking = true;
@@ -87,7 +94,11 @@ async function approve(r, oneOff) {
         finally { checking = false; }
       }, 1000);
       message('Use the button on the dedicated approval page. The system passkey prompt stays local.');
-      const [response] = await chrome.scripting.executeScript({target, world: 'ISOLATED', func: ceremony, args: [{...request, targetName: r.target}]});
+      const [response] = await Promise.race([
+        chrome.scripting.executeScript({target, world: 'ISOLATED', func: ceremony, args: [{...request, targetName: r.target}]}),
+        guard.lost.then(() => { throw new Error('Local forwarding guard lost; start a new login.'); })
+      ]);
+      guard.assertHeld();
       clearInterval(timer);
       if (!response?.result) throw new Error('Approval page was closed or navigated');
       const body = {ticket: claim.ticket, execution: request.execution, ...response.result};
@@ -99,7 +110,7 @@ async function approve(r, oneOff) {
     } catch (e) {
       if (request && claim) await api(claim.endpoint, '/complete', {ticket: claim.ticket, execution: request.execution, error: true}, token).catch(() => {});
       throw e;
-    } finally { clearInterval(timer); activeCancel = null; busy = false; await refresh(); }
+    } finally { clearInterval(timer); activeCancel = null; guard?.release(); busy = false; await refresh(); }
   });
 }
 $('config').onchange = async event => {

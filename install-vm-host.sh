@@ -41,8 +41,8 @@ fi
 chrome_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
   "$chrome_app/Contents/Info.plist")
 autoload -Uz is-at-least
-if ! is-at-least 115 "$chrome_version"; then
-  print -u2 -- "STOP Chrome $chrome_version predates webAuthenticationProxy support"
+if ! is-at-least 156.0.8078.47 "$chrome_version"; then
+  print -u2 -- "STOP Chrome $chrome_version is below the reviewed security baseline 156.0.8078.47"
   exit 2
 fi
 

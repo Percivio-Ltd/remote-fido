@@ -95,3 +95,7 @@ For generated iOS projects, signing prerequisites, and device validation, see [i
 ## Stop or roll back
 
 Disable the new target extension in its own profile before re-enabling the old 0.4 proxy. On a service host, `launchctl bootout gui/$(id -u)/de.lytiq.remote-fido-v2.target` or the `.coordinator` equivalent stops only that service. Disable only its new Tailscale Serve rule, such as HTTPS 9473 on the target or HTTPS 9472 on the coordinator. Preserve private configurations for a deliberate restart; do not delete unrelated services, keys, Chrome profiles, or Serve rules.
+
+## Desktop 0.6 security update
+
+Before following this setup, install a patched supported Node.js release and Chrome 156.0.8078.47 or newer. When upgrading, relaunch Chrome, reload both desktop extensions, accept the approver's new `management` permission, and reopen its page. Keep private deployment configuration and exact service host permissions outside the public repository. See [security and local-approval protection](SECURITY.md).

@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "minimum_chrome_version": "115",
+  "minimum_chrome_version": "156.0.8078.47",
   "name": "LYTiQ Remote FIDO",
   "version": "0.3.2",
   "description": "Forwards Chrome WebAuthn assertions to one operator-controlled FIDO key over Tailscale.",

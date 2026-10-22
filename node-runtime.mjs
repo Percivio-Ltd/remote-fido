@@ -1,5 +1,5 @@
 // Security release floors: https://nodejs.org/en/blog/vulnerability/october-2026-security-releases
-const minimumVersions = ['22.23.4', '24.22.1', '26.12.1'];
+export const minimumVersions = Object.freeze(['22.23.4', '24.22.1', '26.12.1']);
 export const supportedNodeRange = minimumVersions.map(version => `^${version}`).join(' || ');
 
 export function isSupportedNodeVersion(version) {

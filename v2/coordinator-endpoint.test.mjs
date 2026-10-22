@@ -51,5 +51,5 @@ test('approver retains stable identity and only exact rollout host permissions',
   assert.ok(manifest.host_permissions.every(x => !x.includes('://*')));
   const extensionId = crypto.createHash('sha256').update(Buffer.from(manifest.key, 'base64')).digest('hex').slice(0, 32).replace(/[0-9a-f]/g, x => String.fromCharCode(97 + parseInt(x, 16)));
   assert.equal(extensionId, 'hccloojihlmnnpmdkknnloknfbbbelba');
-  assert.equal(manifest.version, '0.5.4');
+  assert.equal(manifest.version, '0.6.0');
 });

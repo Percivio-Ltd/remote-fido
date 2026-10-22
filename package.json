@@ -4,8 +4,11 @@
   "type": "module",
   "engines": { "node": "^22.23.4 || ^24.22.1 || ^26.12.1" },
   "scripts": {
+    "preinstall": "node node-runtime.mjs",
+    "security:check": "node security-check.mjs",
+    "verify": "npm run security:check && npm test && npm run test:browser",
     "test": "node --test test.mjs node-runtime.test.mjs extension/service-worker.test.mjs exporter-lifecycle.test.mjs v2/*.test.mjs",
-    "test:browser": "node tests/browser/approver.test.mjs"
+    "test:browser": "node tests/browser/approver.test.mjs && node tests/browser/forwarding-loop.test.mjs"
   },
-  "devDependencies": { "playwright": "1.58.2" }
+  "devDependencies": { "playwright": "1.64.1" }
 }
